@@ -1,0 +1,66 @@
+import pandas as pd
+import os
+
+# 1. Configuration
+configfile: "config/config.yaml"
+
+# 2. Load Sample Sheet
+# We use Pandas to read the TSV. We force strings to prevent "001" becoming integer 1.
+try:
+    samples_df = pd.read_csv(config["samples_file"], sep="\t", dtype=str).fillna("")
+    samples_df.set_index("sample_name", inplace=True)
+except Exception as e:
+    sys.exit(f"Error reading samples file: {e}")
+
+# Extract sample names for the "rule all"
+SAMPLES = list(samples_df.index)
+
+# 3. Include Modules
+include: "rules/kmermaking.smk" # Index generation
+include: "rules/download.smk"   # GSM Fetching
+include: "rules/quantify.smk"   # Core Processing
+
+# 4. Target Rule
+rule all:
+    input:
+        # The final matrix output
+        os.path.join(config["paths"]["results"], "kmer_counts_raw.tsv"),
+        os.path.join(config["paths"]["results"], "gene_counts_raw.tsv"),
+        # Optional: Quality reports for all samples
+        os.path.join(config["paths"]["data"], "fastp-MultiQC/multiqc_report.html"),
+        os.path.join(config["paths"]["data"], "MultiQC/multiqc_report.html")
+
+# ---------------------------------------------------------------------
+# 5. Input Helper Functions (The "Switch")
+# ---------------------------------------------------------------------
+
+def get_raw_fastq(wildcards):
+    """
+    Determines the input for the preprocessing step (fastp).
+    If type == local: returns the path from the TSV.
+    If type == gsm: returns the output of the download rule.
+    """
+    row = samples_df.loc[wildcards.sample]
+    sample_type = row["type"].lower()
+    
+    if sample_type == "gsm":
+        # Returns the marker file indicating download is complete
+        # The download rule (in download.smk) must produce this pattern
+        return {
+            "r1": f"data/{wildcards.sample}/raw/reads_1.fastq.gz",
+            "r2": f"data/{wildcards.sample}/raw/reads_2.fastq.gz"
+        }
+    
+    elif sample_type == "local":
+        # Returns the direct paths specified in the TSV
+        r1 = row["r1"]
+        r2 = row["r2"]
+        
+        # Validation
+        if not os.path.exists(r1):
+            raise ValueError(f"Local file not found for {wildcards.sample}: {r1}")
+            
+        if r2:
+            return {"r1": r1, "r2": r2}
+        else:
+            return {"r1": r1} # Single end

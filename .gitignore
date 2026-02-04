@@ -1,0 +1,34 @@
+# GIT ignore directories
+# Snakemake internal files
+.snakemake/
+
+# Output and Intermediate Data (from config.yaml)
+data/
+benchmarks/
+resources/index/
+logs/
+
+# Large reference files (keep the mocks, ignore the real ones)
+resources/*.fa
+resources/*.fasta
+resources/*.gtf
+resources/*.bed
+resources/*.idx
+!resources/*_mock.fa
+!resources/*_mock.gtf
+!resources/*_mock.bed
+
+# System files
+.DS_Store
+.idea/
+.vscode/
+.cache/
+.ncbi/
+
+# Logs
+*.log
+
+memo.txt
+total_benchmark_summary.tsv
+workflow.dot
+Run_RepVote.sh

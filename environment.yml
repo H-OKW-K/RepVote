@@ -1,0 +1,8 @@
+name: repvote
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - snakemake=7.32.4
+  - mamba
