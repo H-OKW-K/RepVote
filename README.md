@@ -6,6 +6,8 @@ RepVote is a specialized Snakemake workflow designed for the concurrent quantifi
 
 It features a hybrid input system that handles both Local FASTQ files and automatic downloading of GSM samples from NCBI SRA, making it easy to integrate public datasets with in-house data.
 
+![RepVote Workflow Diagram](./workflow.svg)
+
 ## 📂 Repository Structure
 
 ```text
@@ -13,9 +15,7 @@ RepVote
 ├── workflow/            # Core Snakemake logic (Snakefile, rules, scripts)
 ├── config/              # Configuration files (samples.tsv, config.yaml)
 ├── resources/           # Static resources (GTF, BED)
-├── benchmarks/          # Performance tracking logs
-├── schematics/          # Diagrams and visual resources
-└── Run_RepVote.sh       # Main execution wrapper script
+└── benchmarks/          # Performance tracking logs
 ```
 
 ## 🚀 Getting Started
