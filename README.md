@@ -162,6 +162,18 @@ Upon successful completion, results are stored in the results/ directory:
 * data/gene_counts_raw.tsv: Gene expression counts (aggregated via tximport).
 * data/MultiQC/multiqc_report.html**: Aggregated quality control report.
 
+## 🤝 Acknowledgements & Credits
+
+This workflow is a refactored implementation inspired by the **ARTEMIS** pipeline. 
+While the core logic has been rewritten for this specific workflow, the conceptual framework for **K-mer library generation** (extracting unique K-mers from Genome/BED files) is derived from their methodology.
+
+* **Original Paper:** [Annapragada et al., *Science Translational Medicine* (2024)](https://www.science.org/doi/10.1126/scitranslmed.adj9283)
+* **Original Repository:** [cancer-genomics/artemis2024](https://github.com/cancer-genomics/artemis2024)
+
+**Code Usage:**
+* The script `workflow/scripts/split_bed_by_family.R` is utilized directly from the Artemis repository.
+* The K-mer generation strategy was re-implemented based on the Artemis concept but refactored for this pipeline.
+
 ## 📚 Citation
 
 If you use RepVote in your research, please cite:
