@@ -153,8 +153,8 @@ rule dump_merge_and_layout_gsm:
         done < {input.srr_list}
 
         # 2. Detect Layout & Merge
-        # Check if we have any *_1.fastq files indicating Paired-End
-        if ls {params.temp_dir}/*_1.fastq >/dev/null 2>&1; then
+        # Check if we have any *_2.fastq files indicating Paired-End
+        if ls {params.temp_dir}/*_2.fastq >/dev/null 2>&1; then
             echo "paired" > {output.layout}
             echo "Paired-end detected. Merging..." >> "{log}"
             
@@ -205,30 +205,43 @@ rule stage_combined_data:
         """
         echo "Staging data for type: {params.stype}" > "{log}"
 
+        # Helper function to safely link or copy
+        safe_stage() {{
+            local src_raw="$1"
+            local dest="$2"
+            
+            # Resolve absolute paths to check if they are the same
+            local src=$(readlink -f "$src_raw")
+            local target=$(readlink -f "$dest" 2>/dev/null || echo "$dest")
+
+            if [ "$src" != "$target" ]; then
+                echo "Staging $src to $dest" >> "{log}"
+                # Try symlink; if it fails (Operation not permitted), copy the file
+                ln -sf "$src" "$dest" || cp "$src" "$dest"
+            else
+                echo "Source and destination are the same ($src), skipping." >> "{log}"
+            fi
+        }}
+
         if [ "{params.stype}" == "gsm" ]; then
             # --- GSM STRATEGY ---
-            # Files are already processed in raw_gsm, just symlink them.
-            # We use readlink -f to ensure we link to the absolute path.
-            ln -sf "$(readlink -f {input.r1})" {output.r1}
-            ln -sf "$(readlink -f {input.r2})" {output.r2}
+            safe_stage "{input.r1}" "{output.r1}"
+            safe_stage "{input.r2}" "{output.r2}"
             cp {input.layout} {output.layout}
-            echo "Linked GSM files." >> "{log}"
+            echo "Staged GSM files." >> "{log}"
 
         else
             # --- LOCAL STRATEGY ---
-            # Link the raw local files
-            ln -sf "$(readlink -f {input.r1})" {output.r1}
+            safe_stage "{input.r1}" "{output.r1}"
 
-            # Handle R2 and Layout Generation
             if [ -n "{input.r2}" ]; then
-                ln -sf "$(readlink -f {input.r2})" {output.r2}
+                safe_stage "{input.r2}" "{output.r2}"
                 echo "paired" > {output.layout}
-                echo "Local sample detected as Paired-End." >> "{log}"
+                echo "Local sample: Paired-End." >> "{log}"
             else
-                # Create dummy R2 for Snakemake consistency
                 touch {output.r2}
                 echo "single" > {output.layout}
-                echo "Local sample detected as Single-End." >> "{log}"
+                echo "Local sample: Single-End." >> "{log}"
             fi
         fi
         """

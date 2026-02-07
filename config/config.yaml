@@ -30,15 +30,15 @@ paths:
 # ------------------------------------------------------------------------------
 resources:
   # The Reference Genome (FASTA)
-  genome_fasta: ".test/resources/genome_mock.fa"
+  genome_fasta: "resources/chm13v2.0.fa"
   
   # The Repeat Annotation (BED)
   # Format: No Header, 0-based: [Chr, start, end, subfamily#Class/Family]
-  repeat_bed: ".test/resources/repeats_mock.bed"
+  repeat_bed: "resources/chm13_composite_annotation.bed"
   
   # The Transcriptome (GTF)
   # Used to filter out k-mers that match canonical genes (preventing false positives)
-  genome_gtf: ".test/resources/transcripts_mock.gtf"
+  genome_gtf: "resources/CHM13_2305290852_hs1.ncbiRefSeq.gtf"
 
   #For kallisto
   kallisto:
@@ -119,16 +119,20 @@ docker_images:
 # Adjust these based on your machine. 
 # "heavy" is for Jellyfish/Kallisto (prevents OOM by limiting concurrency).
 resource_profiles:
+  light:
+    threads: 1
+    mem_mb: 4000
+  
   standard:
     threads: 4
     mem_mb: 4000     # 4 GB
   
   heavy:
-    threads: 16      # High threads = Fewer parallel jobs = Safer RAM
+    threads: 8      # High threads = Fewer parallel jobs = Safer RAM
     mem_mb: 32000    # 32 GB (Advises scheduler)
     
   extreme:
-    threads: 24
+    threads: 14
     mem_mb: 64000
 
   io_bound_for_esearch: 1

@@ -110,6 +110,10 @@ indexing:
 ...
 
 resource_profiles:
+  light:
+    threads: 1
+    mem_mb: 4000
+
   standard:
     threads: 4
     mem_mb: 4000
@@ -153,6 +157,18 @@ mamba activate repvote
 snakemake --use-singularity (parameters...) 
 ```
 
+## 🧬 Reference Data
+
+Original paper used this pipeline utilized the **T2T-CHM13 v2.0** assembly and corresponding annotations. You can download the compatible versions from the sources below:
+
+| File Type | Description | Source / Download Link |
+| :--- | :--- | :--- |
+| **Genome** | T2T-CHM13 v2.0 Assembly (`.fa`) | [T2T GitHub (marbl/CHM13)](https://github.com/marbl/CHM13) <br> *File: `chm13v2.0.fa.gz`* |
+| **Transcriptome** | NCBI RefSeq Gene Annotations (`.gtf`) | [UCSC GoldenPath (hs1)](https://hgdownload.soe.ucsc.edu/goldenPath/hs1/bigZips/genes/) <br> *File: `hs1.ncbiRefSeq.gtf.gz`* |
+| **Repeats** | RepeatMasker Annotation (`.bed` / `.out`) | [UCSC GoldenPath (hs1)](https://hgdownload.soe.ucsc.edu/goldenPath/hs1/bigZips/) <br> *File: `hs1.repeatMasker.out.gz`* |
+| **Repeats** | RepeatMasker Annotation (`.bed`) | [T2T GitHub (marbl/CHM13)](https://github.com/marbl/CHM13) <br> *File: `chm13v2.0_RepeatMasker_4.1.2p1.2022Apr14.bed`* |
+| **Repeats** | Cen/Sat v2.1 Annotation (`.bed`) | [T2T GitHub (marbl/CHM13)](https://github.com/marbl/CHM13) <br> *File: `chm13v2.0_censat_v2.1.bed`* |
+
 ## 📊 Outputs
 
 Upon successful completion, results are stored in the results/ directory:
@@ -164,15 +180,21 @@ Upon successful completion, results are stored in the results/ directory:
 
 ## 🤝 Acknowledgements & Credits
 
-This workflow is a refactored implementation inspired by the **ARTEMIS** pipeline. 
-While the core logic has been rewritten for this specific workflow, the conceptual framework for **K-mer library generation** (extracting unique K-mers from Genome/BED files) is derived from their methodology.
+### Scientific Inspiration & Methodology
+This workflow is a refactored implementation inspired by the **ARTEMIS** pipeline. The conceptual framework for **K-mer library generation** (extracting unique K-mers from Genome/BED files) is derived from their methodology, and the `split_bed_by_family.R` script is utilized directly from their repository.
 
-* **Original Paper:** [Annapragada et al., *Science Translational Medicine* (2024)](https://www.science.org/doi/10.1126/scitranslmed.adj9283)
-* **Original Repository:** [cancer-genomics/artemis2024](https://github.com/cancer-genomics/artemis2024)
+* **Paper:** [Annapragada et al., *Science Translational Medicine* (2024)](https://www.science.org/doi/10.1126/scitranslmed.adj9283)
+* **Repository:** [cancer-genomics/artemis2024](https://github.com/cancer-genomics/artemis2024)
 
-**Code Usage:**
-* The script `workflow/scripts/split_bed_by_family.R` is utilized directly from the Artemis repository.
-* The K-mer generation strategy was re-implemented based on the Artemis concept but refactored for this pipeline.
+### Core Tools & Technologies
+RepVote stands on the shoulders of giants. We gratefully acknowledge the authors of the following tools integrated into this pipeline:
+
+* **Workflow Management:** [Snakemake](https://snakemake.github.io)
+* **Quantification:** Kallisto (Bray et al.) and Tximport (Soneson et al.)
+* **K-mer Counting:** Jellyfish (Marçais et al.)
+* **Genomic Arithmetic:** Bedtools (Quinlan et al.)
+* **QC & Reporting:** FastQC, FastP, and MultiQC
+* **Data Processing:** DuckDB and Pandas
 
 ## 📚 Citation
 

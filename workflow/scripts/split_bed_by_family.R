@@ -87,6 +87,7 @@ print(paste("Found", length(names), "unique types to split into files."))
 for (i in 1:length(names)) {
   d<-data_filtered %>% filter(name==names[i])
   nm<-gsub("/","_",names[i])
+  nm <- gsub("[\\?*<>|:]", "", nm)
   output_filename <- file.path(args$output_dir, paste0(nm, ".bed"))
   fwrite(d,output_filename,quote=F,row.names = F,col.names = F,sep="\t")
 }

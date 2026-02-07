@@ -197,12 +197,14 @@ rule kmer_aggregate_matrix:
         json_reports = expand(os.path.join(config["paths"]["data"], "{sample}/fastp/report.json"), sample=SAMPLES)
     output:
         matrix_cpm = os.path.join(config["paths"]["results"], "kmer_counts_cpm.tsv"),
-        matrix_raw = os.path.join(config["paths"]["results"], "kmer_counts_raw.tsv")
+        matrix_raw = os.path.join(config["paths"]["results"], "kmer_counts_raw.tsv"),
+        stats = os.path.join(config["paths"]["results"], "sample_total_reads.tsv")
     log:
         "logs/kmer_aggregate.log"
     run:
         dfs_cpm = []
         dfs_raw = []
+        read_stats = []
         json_path_map = {}
         
         # Map sample names to fastp logs
@@ -231,6 +233,8 @@ rule kmer_aggregate_matrix:
             
             # Use 'total_reads' from 'after_filtering'
             total_reads = float(fastp_data['summary']['after_filtering']['total_reads'])
+
+            read_stats.append({"sample_name": name_wildcard, "total_reads": int(total_reads)})
     
             # 2. Read Rust Output
             # Format: RepeatType \t Count
@@ -260,6 +264,10 @@ rule kmer_aggregate_matrix:
             # 6. Merge and Save CPM
             merged_cpm = pd.concat(dfs_cpm, axis=1).fillna(0.0)
             merged_cpm.to_csv(output.matrix_cpm, sep="\t", index_label="RepeatType")
+
+            df_stats = pd.DataFrame(read_stats)
+            df_stats = df_stats.sort_values("sample_name") 
+            df_stats.to_csv(output.stats, sep="\t", index=False)
 
 # ------------------------------------------------------------------------------
 # 3. Gene Quantification (Kallisto)
@@ -328,7 +336,7 @@ rule kallisto_quant:
         r1 = os.path.join(config["paths"]["data"], "{sample}/fastp/reads_1.trimmed.fastq.gz"),
         r2 = os.path.join(config["paths"]["data"], "{sample}/fastp/reads_2.trimmed.fastq.gz"),
         layout = os.path.join(config["paths"]["data"], "{sample}/raw/layout.txt"),
-        index = os.path.join(config["paths"]["data"], "indexing/kallisto.idx")
+        index = "resources/kallisto.idx"
     output:
         # Kallisto outputs 'abundance.tsv' and 'abundance.h5' in a directory
         outdir = directory(os.path.join(config["paths"]["data"], "{sample}/quant_genes")),

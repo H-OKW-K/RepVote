@@ -76,15 +76,15 @@ checkpoint step_01_split_bed:
     shell:
         """
         # Ensure output directories exist
-        mkdir -p {output.out_dir}
-        mkdir -p {output.stats_dir}
+        mkdir -p "{output.out_dir}"
+        mkdir -p "{output.stats_dir}"
 
         # Call the R script
         # Note: We pass arguments matching the R script's 'argparse' definitions
         Rscript {params.r_script} \
-            --input_bed {input.bed} \
-            --output_dir {output.out_dir} \
-            --intermediate {output.stats_dir}
+            --input_bed "{input.bed}" \
+            --output_dir "{output.out_dir}" \
+            --intermediate "{output.stats_dir}"
         """
 
 rule step_02_get_fasta_per_type:
@@ -101,7 +101,9 @@ rule step_02_get_fasta_per_type:
     container:
         config["docker_images"]["bedtools"]
     shell:
-        "bedtools getfasta -fi {input.genome} -bed {input.bed} -fo {output.fasta}"
+        """
+        bedtools getfasta -fi "{input.genome}" -bed "{input.bed}" -fo "{output.fasta}"
+        """
 
 # ------------------------------------------------------------------------------
 # Phase 2: Genome Masking & Chromosome Splitting
@@ -121,7 +123,9 @@ rule step_03_mask_genome:
     container:
         config["docker_images"]["bedtools"]
     shell:
-        "bedtools maskfasta -fi {input.genome} -bed {input.bed} -fo {output.masked_genome}"
+        """
+        bedtools maskfasta -fi "{input.genome}" -bed "{input.bed}" -fo "{output.masked_genome}"
+        """
 
 checkpoint step_04_split_masked_genome:
     """
@@ -178,7 +182,7 @@ rule step_05_count_chrom_kmers:
             --canonical \
             --output $TMP_DB \
             {input.fasta}
-        jellyfish dump --column $TMP_DB > {output.txt}
+        jellyfish dump --column $TMP_DB > "{output.txt}"
         rm -f $TMP_DB
         """
 
@@ -268,9 +272,9 @@ rule step_08_count_repeat_kmers:
             --canonical \
             --lower-count=1 \
             --output $TMP_DB \
-            {input.fasta}
+            "{input.fasta}"
 
-        jellyfish dump --column $TMP_DB > {output.txt}
+        jellyfish dump --column $TMP_DB > "{output.txt}"
         
         rm -f $TMP_DB
         """
@@ -332,14 +336,16 @@ rule step_10_identify_unique_repeat_kmers:
     params:
         sanitized_path = lambda w, input: input.txt.replace("'", "''")
     threads:
-        config["resource_profiles"]["heavy"]["threads"]
+        config["resource_profiles"]["light"]["threads"]
     resources:
-        mem_mb = config["resource_profiles"]["heavy"]["mem_mb"]
+        mem_mb = config["resource_profiles"]["light"]["mem_mb"]
     container:
         config["docker_images"]["duckdb"]
     shell:
         """      
-        duckdb :memory: "SET memory_limit='{resources.mem_mb}MB'; COPY ( \
+        duckdb :memory: "SET memory_limit='{resources.mem_mb}MB'; \
+            SET threads={threads}; \
+            COPY ( \
             WITH local_counts AS ( \
                 SELECT column0 as kmer, column1 as count \
                 FROM read_csv('{params.sanitized_path}', delim=' ', header=False, columns={{'column0':'VARCHAR', 'column1':'INTEGER'}}) \
@@ -365,20 +371,22 @@ rule step_11_remove_genomic_kmers:
     params:
         sanitized_path = lambda w, input: input.repeat_txt.replace("'", "''")
     threads:
-        config["resource_profiles"]["heavy"]["threads"]
+        config["resource_profiles"]["light"]["threads"]
     resources:
-        mem_mb = config["resource_profiles"]["heavy"]["mem_mb"]
+        mem_mb = config["resource_profiles"]["light"]["mem_mb"]
     container:
         config["docker_images"]["duckdb"]
     shell:
         """
-        duckdb :memory: "SET memory_limit='{resources.mem_mb}MB'; COPY ( \
+        duckdb :memory: "SET memory_limit='{resources.mem_mb}MB'; \
+            SET threads={threads}; \
+            COPY ( \
             SELECT local.kmer \
             FROM read_csv('{params.sanitized_path}', delim='\\t', header=TRUE) AS local \
             LEFT JOIN read_parquet('{input.genome_db}') AS global ON local.kmer = global.kmer \
             WHERE global.kmer IS NULL \
         ) TO '/dev/stdout' (FORMAT CSV, HEADER FALSE)" \
-        | awk -v name="{wildcards.repeat}" '{{print ">" name "_" NR "\\n" $0}}' > {output.clean_fasta}
+        | awk -v name="{wildcards.repeat}" '{{print ">" name "_" NR "\\n" $0}}' > "{output.clean_fasta}"
         """
 
 # ------------------------------------------------------------------------------
@@ -402,7 +410,7 @@ rule step_12_generate_transcriptome_fasta:
         """
         # -w outputs the transcript sequences
         # -g provides the genomic reference for coordinate lookup
-        gffread -w {output.fasta} -g {input.genome} {input.gtf}
+        gffread -w "{output.fasta}" -g "{input.genome}" "{input.gtf}"
         """
 
 rule step_12_process_transcripts:
@@ -435,9 +443,9 @@ rule step_12_process_transcripts:
             --threads {threads} \
             --canonical \
             --output $TMP_DB \
-            {input.transcripts}
+            "{input.transcripts}"
             
-        jellyfish dump --column $TMP_DB > {output.txt}
+        jellyfish dump --column $TMP_DB > "{output.txt}"
         
         rm -f $TMP_DB
         """
@@ -476,25 +484,27 @@ rule step_14_final_filtering:
     benchmark:
         "benchmarks/indexing/step_14_final_filtering_{repeat}.tsv"
     threads:
-        config["resource_profiles"]["heavy"]["threads"]
+        config["resource_profiles"]["light"]["threads"]
     resources:
-        mem_mb = config["resource_profiles"]["heavy"]["mem_mb"]
+        mem_mb = config["resource_profiles"]["light"]["mem_mb"]
     container:
         config["docker_images"]["duckdb"]
     shell:
         """
         if [ -s "{input.clean_fasta}" ]; then
             paste - - < "{input.clean_fasta}" \
-            | duckdb :memory: "SET memory_limit='{resources.mem_mb}MB'; COPY ( \
+            | duckdb :memory: "SET memory_limit='{resources.mem_mb}MB'; \
+                SET threads={threads}; \
+                COPY ( \
                 SELECT local.column0, local.column1 \
                 FROM read_csv('/dev/stdin', delim='\\t', header=FALSE, columns={{'column0':'VARCHAR', 'column1':'VARCHAR'}}) AS local \
                 LEFT JOIN read_parquet('{input.trans_db}') AS global ON local.column1 = global.kmer \
                 WHERE global.kmer IS NULL \
             ) TO '/dev/stdout' (FORMAT CSV, DELIMITER '\\t', HEADER FALSE)" \
-            | tr '\\t' '\\n' > {output.final_fasta}
+            | tr '\\t' '\\n' > "{output.final_fasta}"
         else
             # Handle empty input safely
-            touch {output.final_fasta}
+            touch "{output.final_fasta}"
         fi
         """
 
@@ -527,7 +537,7 @@ rule step_15_generate_summary:
     shell:
         """
         # Header: Name, After (Final), Before (Transcript Filter)
-        printf "Name\\tAfter\\tBefore\\n" > {output.summary}
+        printf "Name\\tAfter\\tBefore\\n" > "{output.summary}"
         
         for file_path_A in "{params.dir_before}"/*; do
             filename=$(basename "$file_path_A")
@@ -537,7 +547,7 @@ rule step_15_generate_summary:
                 count_before=$(grep -c "^>" "$file_path_A" || true)
                 count_after=$(grep -c "^>" "$file_path_B" || true)
                 name="${{filename%.*}}"
-                printf "%s\\t%s\\t%s\\n" "$name" "$count_after" "$count_before" >> {output.summary}
+                printf "%s\\t%s\\t%s\\n" "$name" "$count_after" "$count_before" >> "{output.summary}"
             fi
         done
         """

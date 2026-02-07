@@ -1,3 +1,14 @@
 sample_name	type	r1	r2
-Mock	local	/.test/fastq/mock_sample_R1.fastq.gz	/.test/fastq/mock_sample_R2.fastq.gz
-GSM3752531_HUVEC_IR_3	gsm	GSM3752531
+GSM2828805_IMR90_prol_1	gsm	GSM2828805	
+GSM2828806_IMR90_RS_1	gsm	GSM2828806	
+GSM2828807_IMR90_prol_2	gsm	GSM2828807	
+GSM2828808_IMR90_RS_2	gsm	GSM2828808	
+GSM2828815_IMR90_IR_1	gsm	GSM2828815	
+GSM2828816_IMR90_IR_2	gsm	GSM2828816	
+GSM2828817_IMR90_IR_2	gsm	GSM2828817	
+TIG3_prol_1	local	/data/TIG3_prol_1/fastq/Ctrl_1_1.fastq.gz	/data/TIG3_prol_1/fastq/Ctrl_1_2.fastq.gz
+TIG3_prol_2	local	/data/TIG3_prol_2/fastq/Ctrl_2_1.fastq.gz	/data/TIG3_prol_2/fastq/Ctrl_2_2.fastq.gz
+TIG3_prol_3	local	/data/TIG3_prol_3/fastq/Ctrl_3_1.fastq.gz	/data/TIG3_prol_3/fastq/Ctrl_3_2.fastq.gz
+TIG3_IR_DMSO_1	local	/data/TIG3_IR_DMSO_1/fastq/Sc_1_1.fastq.gz	/data/TIG3_IR_DMSO_1/fastq/Sc_2_1.fastq.gz
+TIG3_IR_DMSO_2	local	/data/TIG3_IR_DMSO_2/fastq/Sc_2_1.fastq.gz	/data/TIG3_IR_DMSO_2/fastq/Sc_2_1.fastq.gz
+TIG3_IR_DMSO_3	local	/data/TIG3_IR_DMSO_3/fastq/Sc_3_1.fastq.gz	/data/TIG3_IR_DMSO_3/fastq/Sc_3_1.fastq.gz
