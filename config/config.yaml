@@ -60,22 +60,15 @@ indexing:
   base_dir: "resources/index"
   
   outputs:
-    step_01_bed_split:       "resources/index/01_bed_split"
-    step_02_fasta_type:      "resources/index/02_fasta_type"
-    step_03_masked_genome:   "resources/index/03_masked_genome/masked.fasta"
-    step_04_split_chrom:     "resources/index/04_split_chromosomes"
-    step_05_chrom_counts:    "resources/index/05_chrom_counts"
-    step_06_genome_kmers:    "resources/index/06_genome_nonrepeat_kmers.txt"
-    step_07_genome_db:       "resources/index/07_genome_kmers.parquet"
-    step_08_repeat_counts:   "resources/index/08_repeat_counts"
-    step_09_global_db:       "resources/index/09_global_counts.parquet"
-    step_10_unique_repeat:   "resources/index/10_unique_kmer_type"
-    step_11_genomic_removed: "resources/index/11_genomic_removed_kmers"
-    step_12_trans_txt:       "resources/index/12_transcript_kmers/kmers.txt"
-    step_13_trans_db:        "resources/index/13_transcript_kmers.parquet"
-    step_14_final_fasta:     "resources/index/14_final_unique_kmers" # <--- The Primary Index Output
-    step_15_summary:         "resources/index/15_removal_summary.tsv"
-    step_16_cleanup_done:    "resources/index/16_cleanup.done"
+    step_01_bed_split:         "resources/index/01_bed_split"
+    step_02_fasta_type:        "resources/index/02_fasta_type"
+    step_03_masked_genome:     "resources/index/03_masked_genome.fasta"
+    step_05_all_repeats_fasta: "resources/index/05_all_repeats.fasta"
+    genome_db:                 "resources/index/06_genome"
+    trans_db:                  "resources/index/06_trans"
+    all_rep_db:                "resources/index/06_allrep"
+    step_07_final_fasta:       "resources/index/07_final_fasta"
+    step_08_summary:           "resources/index/08_summery.tsv"
   
   generated_transcriptome: "resources/transcriptome.fa"
 
@@ -112,6 +105,7 @@ docker_images:
   r_scripting: "docker://hokawa1135/artemis-r:1.0.0"
   repeatquant: "docker://hokawa1135/repeatquant:1.0.0"
   duckdb:      "docker://hokawa1135/customduckdb:0.5.1"
+  kmc:         "docker://hokawa1135/custom-kmc3:1.0.0"
 
 # ------------------------------------------------------------------------------
 # 6. Resource Management (User-Configurable)
@@ -125,15 +119,15 @@ resource_profiles:
   
   standard:
     threads: 4
-    mem_mb: 4000     # 4 GB
+    mem_mb: 7000
   
   heavy:
     threads: 8      # High threads = Fewer parallel jobs = Safer RAM
-    mem_mb: 32000    # 32 GB (Advises scheduler)
+    mem_mb: 14000
     
   extreme:
     threads: 14
-    mem_mb: 64000
+    mem_mb: 94000
 
   io_bound_for_esearch: 1
   io_bound_for_prefetch: 1

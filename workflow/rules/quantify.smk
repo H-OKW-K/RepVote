@@ -110,7 +110,7 @@ rule build_repeat_index:
     """
     container: config["docker_images"]["repeatquant"]
     input:
-        flag = config["indexing"]["outputs"]["step_16_cleanup_done"]
+        flag = config["indexing"]["outputs"]["step_08_summary"]
     output:
         index = config["quantification"]["repeat_index_path"],
         manifest = temp(os.path.join(config["paths"]["data"], "indexing/kmer_file_list.txt"))
@@ -120,7 +120,7 @@ rule build_repeat_index:
         "logs/build_repeat_index.log"
     params:
         k = config["indexing"]["kmer_len"],
-        fasta_dir = config["indexing"]["outputs"]["step_14_final_fasta"]
+        fasta_dir = config["indexing"]["outputs"]["step_07_final_fasta"]
     threads: config["resource_profiles"]["extreme"]["threads"]
     resources:
         mem_mb = config["resource_profiles"]["extreme"]["mem_mb"]

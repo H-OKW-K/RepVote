@@ -181,7 +181,7 @@ Upon successful completion, results are stored in the results/ directory:
 ## 🤝 Acknowledgements & Credits
 
 ### Scientific Inspiration & Methodology
-This workflow is a refactored implementation inspired by the **ARTEMIS** pipeline. The conceptual framework for **K-mer library generation** (extracting unique K-mers from Genome/BED files) is derived from their methodology, and the `split_bed_by_family.R` script is utilized directly from their repository.
+This workflow contains a refactored implementation inspired by the **ARTEMIS** pipeline. The conceptual framework for **K-mer library generation** (extracting unique K-mers from Genome/BED files) is derived from their methodology, and the `split_bed_by_family.R` script is utilized directly from their repository.
 
 * **Paper:** [Annapragada et al., *Science Translational Medicine* (2024)](https://www.science.org/doi/10.1126/scitranslmed.adj9283)
 * **Repository:** [cancer-genomics/artemis2024](https://github.com/cancer-genomics/artemis2024)
