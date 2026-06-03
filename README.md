@@ -15,6 +15,7 @@ RepVote
 ├── workflow/            # Core Snakemake logic (Snakefile, rules, scripts)
 ├── config/              # Configuration files (samples.tsv, config.yaml)
 ├── resources/           # Static resources (GTF, BED)
+├── data/                # Sequence data (fastq.gz) and results (tsv)
 └── benchmarks/          # Performance tracking logs
 ```
 
@@ -32,7 +33,8 @@ RepVote use multiple container images via snakemake.
 
 Clone the repository:
 ```text
-bash git clone [https://github.com/yourusername/RepVote.git](https://github.com/yourusername/RepVote.git) cd RepVote 
+git clone https://github.com/H-OKW-K/RepVote.git
+cd RepVote 
 ```
 
 ## 🧪 Verification / Installation Check
@@ -65,16 +67,8 @@ This file defines your input data. The pipeline supports two modes via the type 
 | :--- | :--- |
 | sample_name | Unique identifier for the sample (Directory name). |
 | type | gsm or local. |
-| r1 | For GSM: The GSM Accession ID (e.g., GSM123456).
-
-
-
-For Local: Absolute path to Read 1. |
-| r2 | For GSM: Leave empty.
-
-
-
-For Local: Absolute path to Read 2 (or empty for Single End). |
+| r1 | For GSM: The GSM Accession ID (e.g., GSM123456).<br>For Local: Absolute path to Read 1. |
+| r2 | For GSM: Leave empty.<br>For Local: Absolute path to Read 2 (or empty for Single End). |
 
 Example config/samples.tsv:
 
