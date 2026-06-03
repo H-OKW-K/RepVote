@@ -1,4 +1,3 @@
-# Base image
 FROM rocker/tidyverse:latest
 
 # Metadata
@@ -14,6 +13,5 @@ RUN R -e "devtools::install_version('argparse', version = '2.3.1', repos = 'http
     && R -e "devtools::install_version('data.table', version = '1.17.8', repos = 'http://cran.us.r-project.org')" \
     && rm -rf /tmp/downloaded_packages/
 
-# Default command
 CMD ["R"]
 #docker build -t artemis-r:1.0.0 .

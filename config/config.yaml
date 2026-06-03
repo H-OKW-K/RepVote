@@ -34,7 +34,7 @@ resources:
   
   # The Repeat Annotation (BED)
   # Format: No Header, 0-based: [Chr, start, end, subfamily#Class/Family]
-  repeat_bed: "resources/chm13_composite_annotation.bed"
+  repeat_bed: "resources/chm13v2.0_RepeatMasker_4.1.2p1.2022Apr14_converted.bed"
   
   # The Transcriptome (GTF)
   # Used to filter out k-mers that match canonical genes (preventing false positives)
@@ -51,9 +51,6 @@ resources:
 # These settings control how the unique k-mer database is constructed.
 indexing:
   kmer_len: 24
-  
-  # Jellyfish hash size
-  hash_size: "1G"       
 
   # --- Internal Pipeline Outputs (Do not modify unless customizing logic) ---
   # All indices will be built inside 'resources/index/'
@@ -83,7 +80,6 @@ quantification:
 # ------------------------------------------------------------------------------
 # RepVote is designed to run with Apptainer/Singularity.
 # - 'docker://' URLs will be automatically pulled and converted to .sif.
-# - Local paths (resources/containers/...) are for your custom tools.
 
 docker_images:
   # -- Public Tools --
@@ -92,19 +88,16 @@ docker_images:
   multiqc:     "docker://quay.io/biocontainers/multiqc:1.31--pyhdfd78af_0"
   kallisto:    "docker://quay.io/biocontainers/kallisto:0.51.1--h2b92561_2"
   bedtools:    "docker://quay.io/biocontainers/bedtools:2.31.1--h13024bc_3"
-  jellyfish:   "docker://quay.io/biocontainers/kmer-jellyfish:2.3.1--py39pl5321h2de1943_6"
   base_unix:   "docker://ubuntu:20.04"
   gawk:        "docker://quay.io/biocontainers/gawk:5.3.1"
   gffread: "docker://quay.io/biocontainers/cufflinks:2.2.1--py36_2"
-  kallisto:    "docker://quay.io/biocontainers/kallisto:0.51.1--h2b92561_2"
   r_tximport:  "docker://quay.io/biocontainers/bioconductor-tximport:1.34.0--r44hdfd78af_0"
   pand: "docker://amancevice/pandas:alpine"
 
   # -- Custom Tools --
   gsm_fetcher: "docker://hokawa1135/gsm-fetcher:1.0.0"
   r_scripting: "docker://hokawa1135/artemis-r:1.0.0"
-  repeatquant: "docker://hokawa1135/repeatquant:1.0.0"
-  duckdb:      "docker://hokawa1135/customduckdb:0.5.1"
+  repeatquant: "docker://hokawa1135/repeatquant:1.0.1"
   kmc:         "docker://hokawa1135/custom-kmc3:1.0.0"
 
 # ------------------------------------------------------------------------------

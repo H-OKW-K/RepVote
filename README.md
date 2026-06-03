@@ -24,13 +24,9 @@ To run RepVote, you can use Docker (easiest, zero-dependency) or a local Conda e
 
 ### Prerequisites
 
-* **Option A: Docker (Recommended)**
-  * [Docker Desktop](https://www.docker.com/products/docker-desktop) or Docker Engine installed.
-  * *No other dependencies needed—the wrapper script handles the environment.*
+RepVote requires Snakemake v7.32.4 (newer versions may work but are currently untested).
 
-* **Option B: Conda/Mamba**
-  * [Mamba](https://mamba.readthedocs.io/en/latest/) or Conda.
-  * Snakemake `v7.32.4` (Newer versions may work but are untested).
+RepVote use multiple container images via snakemake.
 
 ### Installation
 
@@ -38,6 +34,20 @@ Clone the repository:
 ```text
 bash git clone [https://github.com/yourusername/RepVote.git](https://github.com/yourusername/RepVote.git) cd RepVote 
 ```
+
+## 🧪 Verification / Installation Check
+
+Before running the pipeline on your production data, you can verify your installation and environment setup using the provided dummy files.
+
+1. **Move the dummy resources:** Copy or move the test reference files into the core resources directory:
+   
+   ```bash
+   mv .test/resources/* resources/
+   ```
+   
+2. Configure the test samples: Open config/samples.tsv and add the paths to the dummy FASTQ files located in the .test/fastq/ directory. Also update paths in config/config.yaml as the Configuration section below.
+
+3. Run the pipeline: Execute the workflow using the execution commands outlined below.
 
 ## ⚙️ Configuration
 
@@ -99,16 +109,6 @@ resources:
   
 ---------------------------------------------------------------------
 
-User computing resource adjustment
-
----------------------------------------------------------------------
-
-indexing:
-
-  # Jellyfish hash size
-  hash_size: "1G"    
-...
-
 resource_profiles:
   light:
     threads: 1
@@ -131,31 +131,13 @@ resource_profiles:
 
 ## 🏃 Execution
 
-### Option 1: Docker (One-Click Run)
-Run pipeline within a docker container:
+Ensure Snakemake v7.32.4 or newer is activated in your environment before executing.
 ```text
-docker run --rm -it --privileged\
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -v "$(pwd)":/workflow \
-    -w /workflow \
-    snakemake/snakemake:v7.32.4 \
-    snakemake --cores 24 --use-singularity \
+    snakemake --cores 16 --use-singularity \
     --resources mem_mb=100000 io_bound_for_esearch=3 io_bound_for_prefetch=3 \
     --rerun-incomplete
 ```
-
-### Option 2: Conda / HPC
-If you are on a cluster without Docker access:
-
-Create the environment:
-```text
-bash mamba create -n repvote -c bioconda -c conda-forge snakemake=7.32.4
-mamba activate repvote 
-```
-#Run Snakemake:
-```text
-snakemake --use-singularity (parameters...) 
-```
+Note: Customize your runtime resources (e.g., --resources mem_mb=100000) depending on your infrastructure requirements.
 
 ## 🧬 Reference Data
 
@@ -165,7 +147,6 @@ Original paper used this pipeline utilized the **T2T-CHM13 v2.0** assembly and c
 | :--- | :--- | :--- |
 | **Genome** | T2T-CHM13 v2.0 Assembly (`.fa`) | [T2T GitHub (marbl/CHM13)](https://github.com/marbl/CHM13) <br> *File: `chm13v2.0.fa.gz`* |
 | **Transcriptome** | NCBI RefSeq Gene Annotations (`.gtf`) | [UCSC GoldenPath (hs1)](https://hgdownload.soe.ucsc.edu/goldenPath/hs1/bigZips/genes/) <br> *File: `hs1.ncbiRefSeq.gtf.gz`* |
-| **Repeats** | RepeatMasker Annotation (`.bed` / `.out`) | [UCSC GoldenPath (hs1)](https://hgdownload.soe.ucsc.edu/goldenPath/hs1/bigZips/) <br> *File: `hs1.repeatMasker.out.gz`* |
 | **Repeats** | RepeatMasker Annotation (`.bed`) | [T2T GitHub (marbl/CHM13)](https://github.com/marbl/CHM13) <br> *File: `chm13v2.0_RepeatMasker_4.1.2p1.2022Apr14.bed`* |
 | **Repeats** | Cen/Sat v2.1 Annotation (`.bed`) | [T2T GitHub (marbl/CHM13)](https://github.com/marbl/CHM13) <br> *File: `chm13v2.0_censat_v2.1.bed`* |
 
@@ -176,6 +157,7 @@ Upon successful completion, results are stored in the results/ directory:
 * data/kmer_counts_raw.tsv: Raw count matrix for repetitive elements.
 * data/kmer_counts_cpm.tsv: CPM-normalized counts for repeats.
 * data/gene_counts_raw.tsv: Gene expression counts (aggregated via tximport).
+* data/sample_total_reads.tsv: The number of reads which passed fastp in each library. These value are used for CPM calculation.
 * data/MultiQC/multiqc_report.html**: Aggregated quality control report.
 
 ## 🤝 Acknowledgements & Credits
@@ -191,10 +173,10 @@ RepVote stands on the shoulders of giants. We gratefully acknowledge the authors
 
 * **Workflow Management:** [Snakemake](https://snakemake.github.io)
 * **Quantification:** Kallisto (Bray et al.) and Tximport (Soneson et al.)
-* **K-mer Counting:** Jellyfish (Marçais et al.)
+* **K-mer Counting:** KMC3 (Kokot et al.)
 * **Genomic Arithmetic:** Bedtools (Quinlan et al.)
-* **QC & Reporting:** FastQC, FastP, and MultiQC
-* **Data Processing:** DuckDB and Pandas
+* **QC & Reporting:** FastQC (Andrews), Fastp (Chen et al.), and MultiQC (Ewels et al.)
+* **Data Processing:** Pandas
 
 ## 📚 Citation
 

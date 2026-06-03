@@ -27,8 +27,6 @@ print(head(tx2gene))
 
 # --- Run tximport ---
 # Read in transcript-level counts and summarize to gene level
-# 'countsFromAbundance = "lengthScaledTPM"' is the recommended
-# method to generate counts for DESeq2/edgeR.
 cat("Running tximport...\n")
 txi <- tximport(quant_files,
                 type = "kallisto",
@@ -38,7 +36,7 @@ txi <- tximport(quant_files,
 # --- Save output files ---
 cat("tximport complete. Writing output matrices.\n")
 
-# --- Write the raw integer counts (for pydeseq2) ---
+# --- Write the raw integer counts ---
 counts_df <- as.data.frame(round(txi$counts))
 counts_matrix <- data.frame(gene_id = rownames(counts_df), counts_df)
 write.table(
@@ -49,8 +47,7 @@ write.table(
   row.names = FALSE
 )
 
-# --- Write the TPM matrix (for visualization, etc.) ---
-# Replaced tibble::rownames_to_column() with base R
+# --- Write the TPM matrix --
 tpm_df <- as.data.frame(txi$abundance)
 tpm_matrix <- data.frame(gene_id = rownames(tpm_df), tpm_df)
 # Replaced write_tsv() with base R's write.table()

@@ -73,7 +73,7 @@ rule step_03_mask_genome:
         genome = config["resources"]["genome_fasta"],
         bed = config["resources"]["repeat_bed"]
     output:
-        masked_genome = config["indexing"]["outputs"]["step_03_masked_genome"]
+        masked_genome = temp(config["indexing"]["outputs"]["step_03_masked_genome"])
     container:
         config["docker_images"]["bedtools"]
     shell:
@@ -97,7 +97,7 @@ rule step_05_get_all_repeats_fasta:
         genome = config["resources"]["genome_fasta"],
         bed = config["resources"]["repeat_bed"]
     output:
-        fasta = config["indexing"]["outputs"]["step_05_all_repeats_fasta"]
+        fasta = temp(config["indexing"]["outputs"]["step_05_all_repeats_fasta"])
     container:
         config["docker_images"]["bedtools"]
     shell:
@@ -112,14 +112,14 @@ rule step_06a_build_genome_kmc_db:
     input:
         fasta = config["indexing"]["outputs"]["step_03_masked_genome"]
     output:
-        pre = config["indexing"]["outputs"]["genome_db"] + ".kmc_pre",
-        suf = config["indexing"]["outputs"]["genome_db"] + ".kmc_suf"
+        pre = temp(config["indexing"]["outputs"]["genome_db"] + ".kmc_pre"),
+        suf = temp(config["indexing"]["outputs"]["genome_db"] + ".kmc_suf")
     params:
         k = config["indexing"]["kmer_len"],
         prefix = config["indexing"]["outputs"]["genome_db"]
     threads: config["resource_profiles"]["heavy"]["threads"]
     resources:
-        tmpdir = os.path.join(config["paths"]["data"], "tmp_genome")
+        tmpdir = os.path.join(config["indexing"]["base_dir"], "tmp_genome")
     container: config["docker_images"]["kmc"]
     shell:
         """
@@ -132,14 +132,14 @@ rule step_06b_build_trans_kmc_db:
     input:
         fasta = config["indexing"]["generated_transcriptome"]
     output:
-        pre = config["indexing"]["outputs"]["trans_db"] + ".kmc_pre",
-        suf = config["indexing"]["outputs"]["trans_db"] + ".kmc_suf"
+        pre = temp(config["indexing"]["outputs"]["trans_db"] + ".kmc_pre"),
+        suf = temp(config["indexing"]["outputs"]["trans_db"] + ".kmc_suf")
     params:
         k = config["indexing"]["kmer_len"],
         prefix = config["indexing"]["outputs"]["trans_db"]
     threads: config["resource_profiles"]["heavy"]["threads"]
     resources:
-        tmpdir = os.path.join(config["paths"]["data"], "tmp_trans")
+        tmpdir = os.path.join(config["indexing"]["base_dir"], "tmp_trans")
     container: config["docker_images"]["kmc"]
     shell:
         """
@@ -152,14 +152,14 @@ rule step_06c_build_rep_kmc_db:
     input:
         fasta = config["indexing"]["outputs"]["step_05_all_repeats_fasta"]
     output:
-        pre = config["indexing"]["outputs"]["all_rep_db"] + ".kmc_pre",
-        suf = config["indexing"]["outputs"]["all_rep_db"] + ".kmc_suf"
+        pre = temp(config["indexing"]["outputs"]["all_rep_db"] + ".kmc_pre"),
+        suf = temp(config["indexing"]["outputs"]["all_rep_db"] + ".kmc_suf")
     params:
         k = config["indexing"]["kmer_len"],
         prefix = config["indexing"]["outputs"]["all_rep_db"]
     threads: config["resource_profiles"]["heavy"]["threads"]
     resources:
-        tmpdir = os.path.join(config["paths"]["data"], "tmp_rep")
+        tmpdir = os.path.join(config["indexing"]["base_dir"], "tmp_rep")
     container: config["docker_images"]["kmc"]
     shell:
         """
@@ -171,11 +171,14 @@ rule step_06d_build_global_valid_repeats:
     """Filters all repeats against the genome/transcriptome EXACTLY ONCE."""
     input:
         gen_pre = config["indexing"]["outputs"]["genome_db"] + ".kmc_pre",
+        gen_suf = config["indexing"]["outputs"]["genome_db"] + ".kmc_suf",
         trans_pre = config["indexing"]["outputs"]["trans_db"] + ".kmc_pre",
-        rep_pre = config["indexing"]["outputs"]["all_rep_db"] + ".kmc_pre"
+        trans_suf = config["indexing"]["outputs"]["trans_db"] + ".kmc_suf",
+        rep_pre = config["indexing"]["outputs"]["all_rep_db"] + ".kmc_pre",
+        rep_suf = config["indexing"]["outputs"]["all_rep_db"] + ".kmc_suf"
     output:
         # A master text dictionary of every allowed k-mer and its GLOBAL count
-        valid_txt = config["indexing"]["outputs"]["all_rep_db"] + "_valid.txt"
+        valid_txt = temp(config["indexing"]["outputs"]["all_rep_db"] + "_valid.txt")
     params:
         gen_db = config["indexing"]["outputs"]["genome_db"],
         trans_db = config["indexing"]["outputs"]["trans_db"],
@@ -184,7 +187,7 @@ rule step_06d_build_global_valid_repeats:
         valid_db = lambda w, resources: f"{resources.tmpdir}/global_valid"
     threads: config["resource_profiles"]["heavy"]["threads"]
     resources:
-        tmpdir = os.path.join(config["paths"]["data"], "tmp_global")
+        tmpdir = os.path.join(config["indexing"]["base_dir"], "tmp_global")
     container: config["docker_images"]["kmc"]
     shell:
         """
@@ -202,6 +205,7 @@ rule step_06d_build_global_valid_repeats:
         
         # Clean up
         rm -f {params.temp_db}* {params.valid_db}* "{output.valid_txt}.unsorted"
+        rm -rf {resources.tmpdir}
         """
 
 # ------------------------------------------------------------------------------
@@ -221,13 +225,13 @@ rule step_07_process_subfamily:
         mem_gb = lambda wildcards, resources: int(resources.mem_mb / 1000)
     threads: 1 
     resources:
-        tmpdir = lambda w: os.path.join(config["paths"]["data"], f"tmp_{w.repeat}"),
+        tmpdir = lambda w: os.path.join(config["indexing"]["base_dir"], f"tmp_{w.repeat}"),
         mem_mb = 2000
     container: config["docker_images"]["kmc"]
     shell:
         """
         # 1. Count k-mers in this specific subfamily
-        kmc -k{params.k} -m{params.mem_gb} -ci1 -fm -t{threads} "{input.subfam_fasta}" "{params.subfam_db}" {resources.tmpdir}
+        kmc -k{params.k} -m{params.mem_gb} -ci1 -fm -t{threads} "{input.subfam_fasta}" "{params.subfam_db}" "{resources.tmpdir}"
 
         # 2. Dump without KMC sorting, then strictly sort using Unix LC_ALL=C sort
         kmc_tools transform "{params.subfam_db}" dump "{params.subfam_db}.unsorted.txt"
@@ -242,7 +246,9 @@ rule step_07_process_subfamily:
         }}' > "{output.final_fasta}"
 
         # Cleanup local intermediate files
-        rm -f {params.subfam_db}* """
+        rm -f "{params.subfam_db}"* 
+        rm -rf "{resources.tmpdir}"* 
+        """
 
 # ------------------------------------------------------------------------------
 # Phase 4: Reporting
@@ -272,3 +278,8 @@ rule step_08_generate_summary:
         # Cleanup empty FASTAs
         find {params.dir_after} -name "*.fasta" -size 0 -delete
         """
+
+
+
+
+
