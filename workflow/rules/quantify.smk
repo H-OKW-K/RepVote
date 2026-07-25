@@ -104,48 +104,9 @@ rule multiqc_trimmed:
 # 2. Repeat Quantification (Rust Tool)
 # ------------------------------------------------------------------------------
 
-rule build_repeat_index:
-    """
-    Constructs the binary index for the Rust repeat counter.
-    """
-    container: config["docker_images"]["repeatquant"]
-    input:
-        flag = config["indexing"]["outputs"]["step_08_summary"]
-    output:
-        index = config["quantification"]["repeat_index_path"],
-        manifest = temp(os.path.join(config["paths"]["data"], "indexing/kmer_file_list.txt"))
-    benchmark:
-        "benchmarks/quantify/build_index.tsv"
-    log:
-        "logs/build_repeat_index.log"
-    params:
-        k = config["indexing"]["kmer_len"],
-        fasta_dir = config["indexing"]["outputs"]["step_07_final_fasta"]
-    threads: config["resource_profiles"]["extreme"]["threads"]
-    resources:
-        mem_mb = config["resource_profiles"]["extreme"]["mem_mb"]
-    shell:
-        """
-        echo "Building Repeat Index..." > "{log}"
-        
-        # 1. Generate the list of files safely
-        find {params.fasta_dir} -name "*.fasta" > {output.manifest}
-
-        if [ ! -s {output.manifest} ]; then
-            echo "Error: No FASTA files found in {params.fasta_dir}" >> "{log}"
-            exit 1
-        fi
-
-        # 2. Run the Rust tool
-        repeat_counter index \
-            --file-list {output.manifest} \
-            --output {output.index} \
-            --k {params.k} >> "{log}" 2>&1
-        """
-
 rule quantify_repeats:
     """
-    Quantifies repetitive elements using the custom Rust tool.
+    Quantifies repetitive elements with optional 1:1 read assignment tracking.
     """
     container: config["docker_images"]["repeatquant"]
     input:
@@ -154,36 +115,36 @@ rule quantify_repeats:
         layout = os.path.join(config["paths"]["data"], "{sample}/raw/layout.txt"),
         index = config["quantification"]["repeat_index_path"]
     output:
-        counts = os.path.join(config["paths"]["data"], "{sample}/quant_repeats/counts.tsv")
-    benchmark:
-        "benchmarks/quantify/quantify_repeats_{sample}.tsv"
-    log:
-        os.path.join(config["paths"]["data"], "{sample}/logs/repeatquant.log")
+        counts = os.path.join(config["paths"]["data"], "{sample}/quant_repeats/counts.tsv"),
+        assignments = os.path.join(config["paths"]["data"], "{sample}/quant_repeats/assignments.txt") if config["quantification"].get("export_assignments", False) else []
+    params:
+        min_matches = config["quantification"].get("min_kmer_matches", 1),
+        assign_flag = lambda wildcards, output: f"--assignments-out {output.assignments}" if hasattr(output, "assignments") and output.assignments else ""
     threads: config["resource_profiles"]["extreme"]["threads"]
+    benchmark: os.path.join(config["paths"]["benchmarks"], "quant_repeats","{sample}.txt")
     resources:
         mem_mb = config["resource_profiles"]["extreme"]["mem_mb"]
     shell:
         """
-        echo "Starting RepeatQuant for {wildcards.sample}..." > "{log}"
-        mkdir -p $(dirname {output.counts})
         layout=$(cat {input.layout})
-        
+
         if [ "$layout" == "paired" ]; then
-            echo "RepeatQuant: Paired-end mode (Joint Voting)" > "{log}"
             repeat_counter quant \
                 --index {input.index} \
                 --r1 {input.r1} \
                 --r2 {input.r2} \
                 --threads {threads} \
-                --debug \
-                --output {output.counts} >> "{log}" 2>&1
+                --min-matches {params.min_matches} \
+                {params.assign_flag} \
+                --output {output.counts}
         else
-            echo "RepeatQuant: Single-end mode" > "{log}"
             repeat_counter quant \
                 --index {input.index} \
                 --r1 {input.r1} \
                 --threads {threads} \
-                --output {output.counts} >> "{log}" 2>&1
+                --min-matches {params.min_matches} \
+                {params.assign_flag} \
+                --output {output.counts}
         fi
         """
 

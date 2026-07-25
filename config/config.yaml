@@ -18,7 +18,7 @@ paths:
   
   # Where raw downloads and intermediate FASTQ files go
   data: "data"
-  
+
   # Where Snakemake writes performance logs (CPU/RAM usage)
   benchmarks: "benchmarks"
   
@@ -40,71 +40,48 @@ resources:
   # Used to filter out k-mers that match canonical genes (preventing false positives)
   genome_gtf: "resources/CHM13_2305290852_hs1.ncbiRefSeq.gtf"
 
-  #For kallisto
+  # For kallisto
   kallisto:
     fragment_len: 200 # For Single-End only
     fragment_sd: 20
 
 # ------------------------------------------------------------------------------
-# 4. Index Generation Settings (RepVote Build)
+# 4. Index Generation & Quantification Settings
 # ------------------------------------------------------------------------------
-# These settings control how the unique k-mer database is constructed.
+# These settings control how the unique k-mer database is constructed and quantified.
 indexing:
   kmer_len: 24
-
-  # --- Internal Pipeline Outputs (Do not modify unless customizing logic) ---
-  # All indices will be built inside 'resources/index/'
-  base_dir: "resources/index"
-  
+  no_transcript_filter: false
   outputs:
-    step_01_bed_split:         "resources/index/01_bed_split"
-    step_02_fasta_type:        "resources/index/02_fasta_type"
-    step_03_masked_genome:     "resources/index/03_masked_genome.fasta"
-    step_05_all_repeats_fasta: "resources/index/05_all_repeats.fasta"
-    genome_db:                 "resources/index/06_genome"
-    trans_db:                  "resources/index/06_trans"
-    all_rep_db:                "resources/index/06_allrep"
-    step_07_final_fasta:       "resources/index/07_final_fasta"
-    step_08_summary:           "resources/index/08_summery.tsv"
-  
+    final_fasta: "resources/index/final_fasta"
   generated_transcriptome: "resources/transcriptome.fa"
 
 quantification:  
   repeat_index_path: "resources/repeat_index.idx"
-  
-  #Kallisto
+  min_kmer_matches: 1
+  export_assignments: false
   tx2gene: "resources/tx2gene.tsv"
 
 # ------------------------------------------------------------------------------
 # 5. Container Definitions
 # ------------------------------------------------------------------------------
-# RepVote is designed to run with Apptainer/Singularity.
-# - 'docker://' URLs will be automatically pulled and converted to .sif.
-
 docker_images:
-  # -- Public Tools --
   fastqc:      "docker://biocontainers/fastqc:v0.11.9_cv8"
   fastp:       "docker://biocontainers/fastp:v0.20.1_cv1"
   multiqc:     "docker://quay.io/biocontainers/multiqc:1.31--pyhdfd78af_0"
   kallisto:    "docker://quay.io/biocontainers/kallisto:0.51.1--h2b92561_2"
-  bedtools:    "docker://quay.io/biocontainers/bedtools:2.31.1--h13024bc_3"
   base_unix:   "docker://ubuntu:20.04"
   gawk:        "docker://quay.io/biocontainers/gawk:5.3.1"
-  gffread: "docker://quay.io/biocontainers/cufflinks:2.2.1--py36_2"
+  gffread:     "docker://quay.io/biocontainers/cufflinks:2.2.1--py36_2"
   r_tximport:  "docker://quay.io/biocontainers/bioconductor-tximport:1.34.0--r44hdfd78af_0"
-  pand: "docker://amancevice/pandas:alpine"
 
   # -- Custom Tools --
   gsm_fetcher: "docker://hokawa1135/gsm-fetcher:1.0.0"
-  r_scripting: "docker://hokawa1135/artemis-r:1.0.0"
-  repeatquant: "docker://hokawa1135/repeatquant:1.0.1"
-  kmc:         "docker://hokawa1135/custom-kmc3:1.0.0"
+  repeatquant: "resources/containers/repeat_counter/repeatquant.sif"
 
 # ------------------------------------------------------------------------------
-# 6. Resource Management (User-Configurable)
+# 6. Resource Management
 # ------------------------------------------------------------------------------
-# Adjust these based on your machine. 
-# "heavy" is for Jellyfish/Kallisto (prevents OOM by limiting concurrency).
 resource_profiles:
   light:
     threads: 1
@@ -115,11 +92,11 @@ resource_profiles:
     mem_mb: 7000
   
   heavy:
-    threads: 8      # High threads = Fewer parallel jobs = Safer RAM
+    threads: 8
     mem_mb: 14000
     
   extreme:
-    threads: 14
+    threads: 16
     mem_mb: 94000
 
   io_bound_for_esearch: 1

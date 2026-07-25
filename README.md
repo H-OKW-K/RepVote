@@ -2,11 +2,43 @@
 
 
 
-RepVote is a specialized Snakemake workflow designed for the concurrent quantification of repetitive elements (via custom Rust tools) and gene expression (via Kallisto/tximport).
+RepVote is a specialized Snakemake workflow designed for the concurrent quantification of repetitive elements (via custom Rust tool `repeatquant` / `repeat_counter`) and gene expression (via Kallisto/tximport).
 
-It features a hybrid input system that handles both Local FASTQ files and automatic downloading of GSM samples from NCBI SRA, making it easy to integrate public datasets with in-house data.
+It features a hybrid input system that handles both local FASTQ files and automatic downloading of GSM samples from NCBI SRA, making it easy to integrate public datasets with in-house data.
 
 ![RepVote Workflow Diagram](./workflow.svg)
+
+## 🛠️ Standalone `repeatquant` (`repeat_counter`) CLI Usage
+
+The `repeatquant` binary (`repeat_counter`) provides two primary subcommands: `index` and `quant`.
+
+### 1. Indexing (`repeat_counter index`)
+Generates filtered subfamily k-mer FASTA files and/or zero-copy binary index files (`.idx`) from genomic reference data.
+
+* **`--genome <PATH>`**: Path to reference genome FASTA file.
+* **`--bed <PATH>`**: Path to repeat annotation BED file (0-based: Chr, Start, End, Subfamily#Class/Family).
+* **`--gtf <PATH>`**: Path to transcriptome GTF file used to filter out k-mers matching canonical gene transcripts.
+* **`--no-transcript-filter`**: Skip transcriptome k-mer filtering.
+* **`--from-fasta-dir <PATH>`**: Build zero-copy index directly from pre-filtered FASTA files (conflicts with `--genome`/`--bed`/`--gtf`).
+* **`--kmer-fasta-out <PATH>`**: Output directory for inspectable filtered k-mer FASTA files.
+* **`--fasta-only`**: Generate inspectable FASTA files only and stop without building binary index.
+* **`--output <PATH>`**: Path for output zero-copy index file (`.idx`).
+* **`-k, --k <INT>`**: K-mer size (default: 24, supported up to 63).
+* **`--threads <INT>`**: Number of parallel threads (default: 8).
+
+### 2. Quantification (`repeat_counter quant`)
+Quantifies repeat expression from single-end or paired-end FASTQ files using a compiled zero-copy index.
+
+* **`--index <PATH>`**: Path to zero-copy index (`.idx`) file.
+* **`--r1 <PATH>`**: Path to Read 1 FASTQ file (supports gzipped inputs).
+* **`--r2 <PATH>`**: Path to Read 2 FASTQ file (optional for paired-end data).
+* **`--output <PATH>`**: Path for output TSV count file.
+* **`--threads <INT>`**: Number of processing threads (default: 1).
+* **`--min-matches <INT>`**: Minimum k-mer matches required to assign a read (default: 1).
+* **`--assignments-out <PATH>`**: Optional path to export 1:1 read assignment IDs matching FASTQ order.
+* **`--debug`**: Enable debug logging.
+
+---
 
 ## 📂 Repository Structure
 
@@ -157,7 +189,7 @@ Upon successful completion, results are stored in the results/ directory:
 ## 🤝 Acknowledgements & Credits
 
 ### Scientific Inspiration & Methodology
-This workflow contains a refactored implementation inspired by the **ARTEMIS** pipeline. The conceptual framework for **K-mer library generation** (extracting unique K-mers from Genome/BED files) is derived from their methodology, and the `split_bed_by_family.R` script is utilized directly from their repository.
+This workflow incorporates a conceptual framework inspired by the **ARTEMIS** pipeline. The methodology of extracting unique k-mers from repeat regions and filtering out transcript-matching k-mers is derived from their work. No scripts from ARTEMIS are directly used in RepVote; all processing is natively implemented in Rust.
 
 * **Paper:** [Annapragada et al., *Science Translational Medicine* (2024)](https://www.science.org/doi/10.1126/scitranslmed.adj9283)
 * **Repository:** [cancer-genomics/artemis2024](https://github.com/cancer-genomics/artemis2024)
@@ -167,10 +199,8 @@ RepVote stands on the shoulders of giants. We gratefully acknowledge the authors
 
 * **Workflow Management:** [Snakemake](https://snakemake.github.io)
 * **Quantification:** Kallisto (Bray et al.) and Tximport (Soneson et al.)
-* **K-mer Counting:** KMC3 (Kokot et al.)
-* **Genomic Arithmetic:** Bedtools (Quinlan et al.)
 * **QC & Reporting:** FastQC (Andrews), Fastp (Chen et al.), and MultiQC (Ewels et al.)
-* **Data Processing:** Pandas
+* **Rust Libraries for repeatquant:** Rayon, Needletail, Rkyv, Memmap2
 
 ## 📚 Citation
 
