@@ -30,15 +30,15 @@ paths:
 # ------------------------------------------------------------------------------
 resources:
   # The Reference Genome (FASTA)
-  genome_fasta: "resources/chm13v2.0.fa"
+  genome_fasta: ".test/resources/genome_mock.fa"
   
   # The Repeat Annotation (BED)
   # Format: No Header, 0-based: [Chr, start, end, subfamily#Class/Family]
-  repeat_bed: "resources/chm13v2.0_RepeatMasker_4.1.2p1.2022Apr14_converted.bed"
+  repeat_bed: ".test/resources/repeats_mock.bed"
   
   # The Transcriptome (GTF)
   # Used to filter out k-mers that match canonical genes (preventing false positives)
-  genome_gtf: "resources/CHM13_2305290852_hs1.ncbiRefSeq.gtf"
+  genome_gtf: ".test/resources/transcripts_mock.gtf"
 
   # For kallisto
   kallisto:
@@ -77,7 +77,7 @@ docker_images:
 
   # -- Custom Tools --
   gsm_fetcher: "docker://hokawa1135/gsm-fetcher:1.0.0"
-  repeatquant: "resources/containers/repeat_counter/repeatquant.sif"
+  repeatquant: "docker://hokawa1135/repeatquant:1.1.0"
 
 # ------------------------------------------------------------------------------
 # 6. Resource Management
