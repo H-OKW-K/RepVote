@@ -22,9 +22,6 @@ paths:
   # Where Snakemake writes performance logs (CPU/RAM usage)
   benchmarks: "benchmarks"
   
-  # Location for custom .sif files (if not using docker://)
-  containers: "resources/containers"
-
 # ------------------------------------------------------------------------------
 # 3. Reference Resources (User Must Provide)
 # ------------------------------------------------------------------------------
@@ -35,9 +32,9 @@ resources:
   # The Repeat Annotation (BED)
   # Format: No Header, 0-based: [Chr, start, end, subfamily#Class/Family]
   repeat_bed: ".test/resources/repeats_mock.bed"
-  
+
   # The Transcriptome (GTF)
-  # Used to filter out k-mers that match canonical genes (preventing false positives)
+  # Used to filter out randstrobes that match canonical genes (preventing false positives)
   genome_gtf: ".test/resources/transcripts_mock.gtf"
 
   # For kallisto
@@ -59,8 +56,9 @@ indexing:
 quantification:  
   repeat_index_path: "resources/repeat_index.idx"
   min_kmer_matches: 1
-  export_assignments: false
+  export_assignments: true
   tx2gene: "resources/tx2gene.tsv"
+  characterize_subfamilies_file: "config/characterize_subfamilies.txt"
 
 # ------------------------------------------------------------------------------
 # 5. Container Definitions
@@ -77,7 +75,7 @@ docker_images:
 
   # -- Custom Tools --
   gsm_fetcher: "docker://hokawa1135/gsm-fetcher:1.0.0"
-  repeatquant: "docker://hokawa1135/repeatquant:1.1.0"
+  repeatquant: "docker://hokawa1135/repeatquant:1.2.0"
 
 # ------------------------------------------------------------------------------
 # 6. Resource Management

@@ -84,6 +84,48 @@ enum Commands {
         #[arg(long)]
         debug: bool,
     },
+
+    /// Characterize sequence properties of reads assigned to selected repeat subfamilies
+    Characterize {
+        /// FASTQ-order fragment assignments exported by quant --assignments-out
+        #[arg(long)]
+        assignments: PathBuf,
+        /// Optional assignment ID-to-subfamily map. Defaults to <assignments>.map.tsv
+        #[arg(long)]
+        assignment_map: Option<PathBuf>,
+        /// FASTQ read 1 (or single-end FASTQ)
+        #[arg(long)]
+        r1: PathBuf,
+        /// Optional paired-end FASTQ read 2
+        #[arg(long)]
+        r2: Option<PathBuf>,
+        /// Repeat subfamily to characterize. May be repeated or comma-delimited.
+        #[arg(long, required = true, value_delimiter = ',')]
+        subfamily: Vec<String>,
+        /// Output prefix. Produces <prefix>.per_read.tsv and <prefix>.summary.tsv
+        #[arg(long)]
+        output_prefix: PathBuf,
+        /// Number of parallel threads
+        #[arg(long, default_value_t = 1)]
+        threads: usize,
+        /// Include tied assignments that contain a selected subfamily
+        #[arg(long, default_value_t = false)]
+        include_ambiguous: bool,
+        /// Minimum exact reverse-complement tract length to retain
+        #[arg(long, default_value_t = 5)]
+        min_rc_tract: usize,
+        /// Maximum tandem-repeat period to test
+        #[arg(long, default_value_t = 12)]
+        max_period: usize,
+        /// Minimum periodicity score required to report a dominant period
+        #[arg(long, default_value_t = 0.80)]
+        min_periodicity_score: f64,
+        /// Prefer a shorter period when its score is within this delta of the best score
+        #[arg(long, default_value_t = 0.02)]
+        period_equivalence_delta: f64,
+        #[arg(long)]
+        debug: bool,
+    },
 }
 
 #[derive(Archive, Deserialize, Serialize)]
@@ -172,6 +214,40 @@ fn main() {
                 .build_global()
                 .unwrap();
             quantify_sample(index, r1, r2, output, min_matches, assignments_out, debug);
+        }
+        Commands::Characterize {
+            assignments,
+            assignment_map,
+            r1,
+            r2,
+            subfamily,
+            output_prefix,
+            threads,
+            include_ambiguous,
+            min_rc_tract,
+            max_period,
+            min_periodicity_score,
+            period_equivalence_delta,
+            debug,
+        } => {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build_global()
+                .unwrap();
+            characterize_sample(
+                assignments,
+                assignment_map,
+                r1,
+                r2,
+                subfamily,
+                output_prefix,
+                include_ambiguous,
+                min_rc_tract,
+                max_period,
+                min_periodicity_score,
+                period_equivalence_delta,
+                debug,
+            );
         }
     }
 }
@@ -349,15 +425,15 @@ fn build_full_pipeline(
         }
 
         let raw_name = cols[3];
-        repeat_intervals_by_chrom
-            .entry(chrom.clone())
-            .or_default()
-            .push((start, end));
-
         let family = get_family_from_name(raw_name);
         if family == "Unknown" || family == "Simple_repeat" || family == "Low_complexity" {
             continue;
         }
+       
+        repeat_intervals_by_chrom
+            .entry(chrom.clone())
+            .or_default()
+            .push((start, end));
 
         let san_name = sanitize_name(raw_name);
         let subfam_id = *subfam_map.entry(san_name.clone()).or_insert_with(|| {
@@ -808,12 +884,7 @@ fn quantify_sample(
 
     // Optional Read Assignment Output Writers
     let mut assign_writer = assignments_out.as_ref().map(|path| {
-        let mut map_path = path.clone();
-        let file_name = format!(
-            "{}.map.tsv",
-            path.file_name().unwrap().to_str().unwrap()
-        );
-        map_path.set_file_name(file_name);
+        let map_path = default_assignment_map_path(path);
 
         let mut map_file = BufWriter::new(File::create(map_path).expect("Cannot create ID map file"));
         writeln!(map_file, "ID\tSubfamily").unwrap();
@@ -894,6 +965,948 @@ fn quantify_sample(
     writeln!(out, "RepeatType\tCount").unwrap();
     for (i, count) in final_counts.iter().enumerate() {
         writeln!(out, "{}\t{:.2}", meta.names[i], count).unwrap();
+    }
+}
+
+
+// ============================================================================== 
+// POST-ASSIGNMENT READ CHARACTERIZATION
+// ============================================================================== 
+
+#[derive(Clone)]
+struct CharacterizationFragment {
+    fragment_id: u64,
+    r1_id: String,
+    r1_seq: Vec<u8>,
+    r2: Option<(String, Vec<u8>)>,
+    winners: Vec<u16>,
+    selected_winners: Vec<u16>,
+}
+
+#[derive(Clone, Copy)]
+struct ReadMetrics {
+    length: usize,
+    valid_bases: usize,
+    gc_fraction: f64,
+    a_fraction: f64,
+    c_fraction: f64,
+    g_fraction: f64,
+    t_fraction: f64,
+    base_entropy: f64,
+    max_homopolymer_nt: usize,
+    mono_dominance: f64,
+    di_dominance: f64,
+    tri_dominance: f64,
+    rc_covered_fraction: f64,
+    max_rc_tract_nt: usize,
+    rc_tract_count: usize,
+    dominant_period_nt: Option<usize>,
+    periodicity_score: f64,
+    repeat_units: Option<f64>,
+}
+
+struct CharacterizationRow {
+    fragment_id: u64,
+    read_id: String,
+    mate: &'static str,
+    winners: Vec<u16>,
+    selected_winners: Vec<u16>,
+    metrics: ReadMetrics,
+}
+
+#[derive(Clone, Copy)]
+struct SummaryStats {
+    n: usize,
+    mean: f64,
+    sd: f64,
+    median: f64,
+    q1: f64,
+    q3: f64,
+    p05: f64,
+    p95: f64,
+}
+
+const SUMMARY_METRICS: &[&str] = &[
+    "length",
+    "valid_bases",
+    "gc_fraction",
+    "a_fraction",
+    "c_fraction",
+    "g_fraction",
+    "t_fraction",
+    "base_entropy",
+    "max_homopolymer_nt",
+    "mono_dominance",
+    "di_dominance",
+    "tri_dominance",
+    "rc_covered_fraction",
+    "max_rc_tract_nt",
+    "rc_tract_count",
+    "dominant_period_nt",
+    "periodicity_score",
+    "repeat_units",
+];
+
+fn characterize_sample(
+    assignments_path: PathBuf,
+    assignment_map_path: Option<PathBuf>,
+    r1_path: PathBuf,
+    r2_path: Option<PathBuf>,
+    requested_subfamilies: Vec<String>,
+    output_prefix: PathBuf,
+    include_ambiguous: bool,
+    min_rc_tract: usize,
+    max_period: usize,
+    min_periodicity_score: f64,
+    period_equivalence_delta: f64,
+    debug: bool,
+) {
+    assert!(min_rc_tract >= 1, "--min-rc-tract must be at least 1");
+    assert!(max_period >= 1, "--max-period must be at least 1");
+    assert!(
+        (0.0..=1.0).contains(&min_periodicity_score),
+        "--min-periodicity-score must be between 0 and 1"
+    );
+    assert!(
+        (0.0..=1.0).contains(&period_equivalence_delta),
+        "--period-equivalence-delta must be between 0 and 1"
+    );
+
+    let map_path = assignment_map_path
+        .unwrap_or_else(|| default_assignment_map_path(&assignments_path));
+    let subfamily_names = load_assignment_map(&map_path);
+
+    let mut selected_order: Vec<u16> = Vec::new();
+    let mut selected_set: FxHashSet<u16> = FxHashSet::default();
+    for requested in requested_subfamilies {
+        let match_id = subfamily_names
+            .iter()
+            .position(|name| name == &requested)
+            .unwrap_or_else(|| {
+                panic!(
+                    "Requested subfamily '{}' is not present in assignment map {:?}",
+                    requested, map_path
+                )
+            });
+        assert!(
+            match_id <= u16::MAX as usize,
+            "Assignment map contains an ID too large for u16"
+        );
+        let id = match_id as u16;
+        if selected_set.insert(id) {
+            selected_order.push(id);
+        }
+    }
+
+    if debug {
+        eprintln!(
+            "[INFO] Characterization inputs: assignments={:?}, assignment_map={:?}, include_ambiguous={}",
+            assignments_path, map_path, include_ambiguous
+        );
+        eprintln!(
+            "[INFO] Characterization settings: min_rc_tract={}, max_period={}, min_periodicity_score={:.3}, period_equivalence_delta={:.3}",
+            min_rc_tract,
+            max_period,
+            min_periodicity_score,
+            period_equivalence_delta
+        );
+    }
+
+    let assignments_file =
+        File::open(&assignments_path).expect("Cannot open quant assignment output file");
+    let mut assignments_reader =
+        BufReader::with_capacity(512 * 1024, assignments_file);
+    let mut assignment_line = String::new();
+
+    let per_read_path = append_path_suffix(&output_prefix, ".per_read.tsv");
+    let summary_path = append_path_suffix(&output_prefix, ".summary.tsv");
+    let mut per_read = BufWriter::new(
+        File::create(&per_read_path).expect("Cannot create per-read characterization output"),
+    );
+    writeln!(
+        per_read,
+        "fragment_id\tread_id\tmate\tsubfamily\tassignment\tassignment_ambiguous\tlength\tvalid_bases\tgc_fraction\ta_fraction\tc_fraction\tg_fraction\tt_fraction\tbase_entropy\tmax_homopolymer_nt\tmono_dominance\tdi_dominance\ttri_dominance\trc_covered_fraction\tmax_rc_tract_nt\trc_tract_count\tdominant_period_nt\tperiodicity_score\trepeat_units"
+    )
+    .unwrap();
+
+    let mut summary_rows: FxHashMap<u16, Vec<ReadMetrics>> = FxHashMap::default();
+    for &id in &selected_order {
+        summary_rows.insert(id, Vec::new());
+    }
+
+    let mut r1 = get_fastx_reader(&r1_path);
+    let mut r2 = r2_path.as_ref().map(get_fastx_reader);
+    let batch_size = 20_000usize;
+    let mut fragment_id = 0u64;
+    let mut total_characterized_rows = 0u64;
+
+    loop {
+        let mut batch = Vec::with_capacity(batch_size);
+        let mut records_read = 0usize;
+
+        for _ in 0..batch_size {
+            match r1.next() {
+                Some(Ok(a)) => {
+                    fragment_id += 1;
+                    records_read += 1;
+
+                    assignment_line.clear();
+                    let assignment_bytes = assignments_reader
+                        .read_line(&mut assignment_line)
+                        .expect("Failed while reading quant assignment output");
+                    if assignment_bytes == 0 {
+                        panic!(
+                            "Assignment file ended before R1 FASTQ at fragment {}",
+                            fragment_id
+                        );
+                    }
+                    let winners = parse_assignment_line(
+                        &assignment_line,
+                        fragment_id,
+                        subfamily_names.len(),
+                    );
+
+                    let r2_record = if let Some(r2_reader) = r2.as_mut() {
+                        match r2_reader.next() {
+                            Some(Ok(b)) => Some((
+                                tsv_safe(&String::from_utf8_lossy(b.id())),
+                                b.seq().to_vec(),
+                            )),
+                            Some(Err(_)) => panic!("Failed while reading R2 FASTQ"),
+                            None => panic!("R2 FASTQ ended before R1 FASTQ"),
+                        }
+                    } else {
+                        None
+                    };
+
+                    // Assignment is a fragment-level product from quant. Characterization
+                    // only selects from that product; it never re-runs k-mer assignment.
+                    if winners.is_empty() || (!include_ambiguous && winners.len() != 1) {
+                        continue;
+                    }
+
+                    let selected_winners: Vec<u16> = winners
+                        .iter()
+                        .copied()
+                        .filter(|id| selected_set.contains(id))
+                        .collect();
+                    if selected_winners.is_empty() {
+                        continue;
+                    }
+
+                    batch.push(CharacterizationFragment {
+                        fragment_id,
+                        r1_id: tsv_safe(&String::from_utf8_lossy(a.id())),
+                        r1_seq: a.seq().to_vec(),
+                        r2: r2_record,
+                        winners,
+                        selected_winners,
+                    });
+                }
+                Some(Err(_)) => panic!("Failed while reading R1 FASTQ"),
+                None => break,
+            }
+        }
+
+        if records_read == 0 {
+            break;
+        }
+
+        let grouped_rows: Vec<Vec<CharacterizationRow>> = batch
+            .par_iter()
+            .map(|fragment| {
+                let mut rows = Vec::with_capacity(if fragment.r2.is_some() { 2 } else { 1 });
+                rows.push(CharacterizationRow {
+                    fragment_id: fragment.fragment_id,
+                    read_id: fragment.r1_id.clone(),
+                    mate: "R1",
+                    winners: fragment.winners.clone(),
+                    selected_winners: fragment.selected_winners.clone(),
+                    metrics: characterize_read(
+                        &fragment.r1_seq,
+                        min_rc_tract,
+                        max_period,
+                        min_periodicity_score,
+                        period_equivalence_delta,
+                    ),
+                });
+
+                if let Some((r2_id, r2_seq)) = &fragment.r2 {
+                    rows.push(CharacterizationRow {
+                        fragment_id: fragment.fragment_id,
+                        read_id: r2_id.clone(),
+                        mate: "R2",
+                        winners: fragment.winners.clone(),
+                        selected_winners: fragment.selected_winners.clone(),
+                        metrics: characterize_read(
+                            r2_seq,
+                            min_rc_tract,
+                            max_period,
+                            min_periodicity_score,
+                            period_equivalence_delta,
+                        ),
+                    });
+                }
+                rows
+            })
+            .collect();
+
+        for rows in grouped_rows {
+            for row in rows {
+                let selected_names = join_subfamily_names(&subfamily_names, &row.selected_winners);
+                let assignment_names = join_subfamily_names(&subfamily_names, &row.winners);
+                write_characterization_row(
+                    &mut per_read,
+                    &row,
+                    &selected_names,
+                    &assignment_names,
+                );
+                for selected_id in &row.selected_winners {
+                    summary_rows
+                        .get_mut(selected_id)
+                        .expect("Selected subfamily summary accumulator missing")
+                        .push(row.metrics);
+                }
+                total_characterized_rows += 1;
+            }
+        }
+
+        if debug && fragment_id % 100_000 < batch_size as u64 {
+            eprintln!(
+                "[INFO] Processed {} assignment/FASTQ fragments; emitted {} characterized read rows",
+                fragment_id, total_characterized_rows
+            );
+        }
+    }
+
+    if let Some(r2_reader) = r2.as_mut() {
+        match r2_reader.next() {
+            Some(_) => panic!("R2 FASTQ contains more records than R1 FASTQ"),
+            None => {}
+        }
+    }
+
+    assignment_line.clear();
+    if assignments_reader
+        .read_line(&mut assignment_line)
+        .expect("Failed while checking assignment file length")
+        != 0
+    {
+        panic!("Assignment file contains more records than R1 FASTQ");
+    }
+
+    per_read.flush().unwrap();
+    write_characterization_summary(
+        &summary_path,
+        &subfamily_names,
+        &selected_order,
+        &summary_rows,
+    );
+
+    println!("[INFO] Per-read characterization: {:?}", per_read_path);
+    println!("[INFO] Characterization summary: {:?}", summary_path);
+}
+
+fn default_assignment_map_path(assignments_path: &PathBuf) -> PathBuf {
+    let mut map_path = assignments_path.clone();
+    let file_name = assignments_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("Assignment path must have a valid UTF-8 file name");
+    map_path.set_file_name(format!("{}.map.tsv", file_name));
+    map_path
+}
+
+fn load_assignment_map(path: &PathBuf) -> Vec<String> {
+    let file = File::open(path).unwrap_or_else(|_| {
+        panic!(
+            "Cannot open assignment map {:?}. Pass --assignment-map explicitly if it is not next to the assignment file.",
+            path
+        )
+    });
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+
+    let n = reader
+        .read_line(&mut line)
+        .expect("Failed while reading assignment map header");
+    assert!(n > 0, "Assignment map is empty");
+    assert_eq!(
+        line.trim(),
+        "ID\tSubfamily",
+        "Assignment map must begin with the header 'ID\\tSubfamily'"
+    );
+
+    let mut names_by_id: Vec<Option<String>> = Vec::new();
+    let mut line_number = 1usize;
+    loop {
+        line.clear();
+        if reader
+            .read_line(&mut line)
+            .expect("Failed while reading assignment map")
+            == 0
+        {
+            break;
+        }
+        line_number += 1;
+        let trimmed = line.trim_end_matches(&['\r', '\n'][..]);
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let (id_text, name) = trimmed.split_once('\t').unwrap_or_else(|| {
+            panic!(
+                "Invalid assignment map row {}: expected ID<TAB>Subfamily",
+                line_number
+            )
+        });
+        let id: usize = id_text.parse().unwrap_or_else(|_| {
+            panic!(
+                "Invalid assignment ID '{}' in map row {}",
+                id_text, line_number
+            )
+        });
+        assert!(
+            id <= u16::MAX as usize,
+            "Assignment ID {} in map row {} exceeds u16 range",
+            id,
+            line_number
+        );
+        assert!(
+            !name.is_empty(),
+            "Empty subfamily name in assignment map row {}",
+            line_number
+        );
+
+        if names_by_id.len() <= id {
+            names_by_id.resize(id + 1, None);
+        }
+        assert!(
+            names_by_id[id].is_none(),
+            "Duplicate assignment ID {} in map row {}",
+            id,
+            line_number
+        );
+        names_by_id[id] = Some(name.to_string());
+    }
+
+    assert!(
+        !names_by_id.is_empty(),
+        "Assignment map contains no subfamily entries"
+    );
+
+    names_by_id
+        .into_iter()
+        .enumerate()
+        .map(|(id, name)| {
+            name.unwrap_or_else(|| panic!("Assignment map is missing ID {}", id))
+        })
+        .collect()
+}
+
+fn parse_assignment_line(line: &str, fragment_id: u64, num_subfamilies: usize) -> Vec<u16> {
+    let trimmed = line.trim();
+    if trimmed == "-1" {
+        return Vec::new();
+    }
+    assert!(
+        !trimmed.is_empty(),
+        "Empty assignment record at fragment {}",
+        fragment_id
+    );
+
+    let mut winners = Vec::new();
+    for token in trimmed.split(',') {
+        let id: u16 = token.parse().unwrap_or_else(|_| {
+            panic!(
+                "Invalid assignment token '{}' at fragment {}",
+                token, fragment_id
+            )
+        });
+        assert!(
+            (id as usize) < num_subfamilies,
+            "Assignment ID {} at fragment {} is absent from the assignment map",
+            id,
+            fragment_id
+        );
+        winners.push(id);
+    }
+    winners.sort_unstable();
+    winners.dedup();
+    winners
+}
+
+fn append_path_suffix(path: &PathBuf, suffix: &str) -> PathBuf {
+    let mut os = path.as_os_str().to_os_string();
+    os.push(suffix);
+    PathBuf::from(os)
+}
+
+fn tsv_safe(text: &str) -> String {
+    text.replace('\t', " ").replace('\n', " ").replace('\r', " ")
+}
+
+fn join_subfamily_names(names: &[String], ids: &[u16]) -> String {
+    ids.iter()
+        .map(|&id| names[id as usize].as_str())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn characterize_read(
+    seq: &[u8],
+    min_rc_tract: usize,
+    max_period: usize,
+    min_periodicity_score: f64,
+    period_equivalence_delta: f64,
+) -> ReadMetrics {
+    let length = seq.len();
+    let mut counts = [0usize; 4];
+    for &base in seq {
+        if let Some(code) = base_code(base) {
+            counts[code as usize] += 1;
+        }
+    }
+    let valid_bases: usize = counts.iter().sum();
+    let denom = valid_bases as f64;
+    let a_fraction = safe_fraction(counts[0], valid_bases);
+    let c_fraction = safe_fraction(counts[1], valid_bases);
+    let g_fraction = safe_fraction(counts[2], valid_bases);
+    let t_fraction = safe_fraction(counts[3], valid_bases);
+    let gc_fraction = safe_fraction(counts[1] + counts[2], valid_bases);
+
+    let base_entropy = if valid_bases == 0 {
+        0.0
+    } else {
+        let mut entropy = 0.0;
+        for &count in &counts {
+            if count > 0 {
+                let p = count as f64 / denom;
+                entropy -= p * p.log2();
+            }
+        }
+        entropy / 2.0
+    };
+
+    let max_homopolymer_nt = longest_homopolymer(seq);
+    let mono_dominance = dominant_kmer_fraction(seq, 1);
+    let di_dominance = dominant_kmer_fraction(seq, 2);
+    let tri_dominance = dominant_kmer_fraction(seq, 3);
+    let (rc_covered_fraction, max_rc_tract_nt, rc_tract_count) =
+        reverse_complementarity_metrics(seq, min_rc_tract, valid_bases);
+    let (dominant_period_nt, periodicity_score, repeat_units) = periodicity_metrics(
+        seq,
+        max_period,
+        min_periodicity_score,
+        period_equivalence_delta,
+    );
+
+    ReadMetrics {
+        length,
+        valid_bases,
+        gc_fraction,
+        a_fraction,
+        c_fraction,
+        g_fraction,
+        t_fraction,
+        base_entropy,
+        max_homopolymer_nt,
+        mono_dominance,
+        di_dominance,
+        tri_dominance,
+        rc_covered_fraction,
+        max_rc_tract_nt,
+        rc_tract_count,
+        dominant_period_nt,
+        periodicity_score,
+        repeat_units,
+    }
+}
+
+#[inline]
+fn base_code(base: u8) -> Option<u8> {
+    match base {
+        b'A' | b'a' => Some(0),
+        b'C' | b'c' => Some(1),
+        b'G' | b'g' => Some(2),
+        b'T' | b't' => Some(3),
+        _ => None,
+    }
+}
+
+#[inline]
+fn safe_fraction(numerator: usize, denominator: usize) -> f64 {
+    if denominator == 0 {
+        0.0
+    } else {
+        numerator as f64 / denominator as f64
+    }
+}
+
+fn longest_homopolymer(seq: &[u8]) -> usize {
+    let mut best = 0usize;
+    let mut run = 0usize;
+    let mut previous: Option<u8> = None;
+    for &base in seq {
+        match base_code(base) {
+            Some(code) if previous == Some(code) => {
+                run += 1;
+            }
+            Some(code) => {
+                previous = Some(code);
+                run = 1;
+            }
+            None => {
+                previous = None;
+                run = 0;
+            }
+        }
+        best = best.max(run);
+    }
+    best
+}
+
+fn dominant_kmer_fraction(seq: &[u8], k: usize) -> f64 {
+    if k == 0 || seq.len() < k {
+        return 0.0;
+    }
+
+    let mut counts: FxHashMap<u8, usize> = FxHashMap::default();
+    let mut valid_windows = 0usize;
+    for start in 0..=(seq.len() - k) {
+        let mut key = 0u8;
+        let mut valid = true;
+        for &base in &seq[start..start + k] {
+            if let Some(code) = base_code(base) {
+                key = (key << 2) | code;
+            } else {
+                valid = false;
+                break;
+            }
+        }
+        if valid {
+            *counts.entry(key).or_insert(0) += 1;
+            valid_windows += 1;
+        }
+    }
+
+    if valid_windows == 0 {
+        0.0
+    } else {
+        let max_count = counts.values().copied().max().unwrap_or(0);
+        max_count as f64 / valid_windows as f64
+    }
+}
+
+fn reverse_complementarity_metrics(
+    seq: &[u8],
+    min_tract: usize,
+    valid_bases: usize,
+) -> (f64, usize, usize) {
+    let n = seq.len();
+    if n < 2 || min_tract == 0 {
+        return (0.0, 0, 0);
+    }
+
+    let mut covered = vec![false; n];
+    let mut max_tract = 0usize;
+    let mut tract_count = 0usize;
+
+    // A reverse-complement tract is a maximal run along an anti-diagonal:
+    // (i, j), (i+1, j-1), ... where the bases are exact complements.
+    // Scanning maximal runs prevents a long tract from being counted as many
+    // overlapping short k-mer matches.
+    for sum in 1..=(2 * n - 3) {
+        let first_i = sum.saturating_sub(n - 1);
+        let last_i = std::cmp::min((sum - 1) / 2, n - 1);
+        if first_i > last_i {
+            continue;
+        }
+
+        let mut run_start = 0usize;
+        let mut run_len = 0usize;
+        for i in first_i..=last_i {
+            let j = sum - i;
+            let complementary = match (base_code(seq[i]), base_code(seq[j])) {
+                (Some(a), Some(b)) => (a ^ b) == 3,
+                _ => false,
+            };
+
+            if complementary {
+                if run_len == 0 {
+                    run_start = i;
+                }
+                run_len += 1;
+            } else if run_len > 0 {
+                finalize_rc_run(
+                    sum,
+                    run_start,
+                    run_len,
+                    min_tract,
+                    &mut covered,
+                    &mut max_tract,
+                    &mut tract_count,
+                );
+                run_len = 0;
+            }
+        }
+
+        if run_len > 0 {
+            finalize_rc_run(
+                sum,
+                run_start,
+                run_len,
+                min_tract,
+                &mut covered,
+                &mut max_tract,
+                &mut tract_count,
+            );
+        }
+    }
+
+    let covered_bases = covered.iter().filter(|&&is_covered| is_covered).count();
+    (
+        safe_fraction(covered_bases, valid_bases),
+        max_tract,
+        tract_count,
+    )
+}
+
+fn finalize_rc_run(
+    sum: usize,
+    run_start: usize,
+    run_len: usize,
+    min_tract: usize,
+    covered: &mut [bool],
+    max_tract: &mut usize,
+    tract_count: &mut usize,
+) {
+    if run_len < min_tract {
+        return;
+    }
+    *tract_count += 1;
+    *max_tract = (*max_tract).max(run_len);
+    for offset in 0..run_len {
+        let i = run_start + offset;
+        let j = sum - i;
+        covered[i] = true;
+        covered[j] = true;
+    }
+}
+
+fn periodicity_metrics(
+    seq: &[u8],
+    max_period: usize,
+    min_score: f64,
+    equivalence_delta: f64,
+) -> (Option<usize>, f64, Option<f64>) {
+    let n = seq.len();
+    let max_test_period = std::cmp::min(max_period, n / 2);
+    if max_test_period == 0 {
+        return (None, 0.0, None);
+    }
+
+    let mut scores = Vec::with_capacity(max_test_period);
+    let mut best_score = 0.0f64;
+    for period in 1..=max_test_period {
+        let mut comparable = 0usize;
+        let mut matches = 0usize;
+        for i in period..n {
+            if let (Some(a), Some(b)) = (base_code(seq[i]), base_code(seq[i - period])) {
+                comparable += 1;
+                if a == b {
+                    matches += 1;
+                }
+            }
+        }
+        let score = safe_fraction(matches, comparable);
+        best_score = best_score.max(score);
+        scores.push(score);
+    }
+
+    if best_score < min_score {
+        return (None, best_score, None);
+    }
+
+    let cutoff = (best_score - equivalence_delta).max(min_score);
+    let dominant_period = scores
+        .iter()
+        .enumerate()
+        .find_map(|(idx, &score)| if score >= cutoff { Some(idx + 1) } else { None });
+
+    match dominant_period {
+        Some(period) => (
+            Some(period),
+            scores[period - 1],
+            Some(n as f64 / period as f64),
+        ),
+        None => (None, best_score, None),
+    }
+}
+
+fn write_characterization_row(
+    writer: &mut BufWriter<File>,
+    row: &CharacterizationRow,
+    selected_names: &str,
+    assignment_names: &str,
+) {
+    let m = row.metrics;
+    let period = m
+        .dominant_period_nt
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| "NA".to_string());
+    let repeat_units = m
+        .repeat_units
+        .map(|v| format!("{:.6}", v))
+        .unwrap_or_else(|| "NA".to_string());
+
+    writeln!(
+        writer,
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{}\t{}\t{}\t{:.6}\t{}",
+        row.fragment_id,
+        row.read_id,
+        row.mate,
+        selected_names,
+        assignment_names,
+        row.winners.len() > 1,
+        m.length,
+        m.valid_bases,
+        m.gc_fraction,
+        m.a_fraction,
+        m.c_fraction,
+        m.g_fraction,
+        m.t_fraction,
+        m.base_entropy,
+        m.max_homopolymer_nt,
+        m.mono_dominance,
+        m.di_dominance,
+        m.tri_dominance,
+        m.rc_covered_fraction,
+        m.max_rc_tract_nt,
+        m.rc_tract_count,
+        period,
+        m.periodicity_score,
+        repeat_units
+    )
+    .unwrap();
+}
+
+fn metric_value(metrics: &ReadMetrics, metric: &str) -> Option<f64> {
+    match metric {
+        "length" => Some(metrics.length as f64),
+        "valid_bases" => Some(metrics.valid_bases as f64),
+        "gc_fraction" => Some(metrics.gc_fraction),
+        "a_fraction" => Some(metrics.a_fraction),
+        "c_fraction" => Some(metrics.c_fraction),
+        "g_fraction" => Some(metrics.g_fraction),
+        "t_fraction" => Some(metrics.t_fraction),
+        "base_entropy" => Some(metrics.base_entropy),
+        "max_homopolymer_nt" => Some(metrics.max_homopolymer_nt as f64),
+        "mono_dominance" => Some(metrics.mono_dominance),
+        "di_dominance" => Some(metrics.di_dominance),
+        "tri_dominance" => Some(metrics.tri_dominance),
+        "rc_covered_fraction" => Some(metrics.rc_covered_fraction),
+        "max_rc_tract_nt" => Some(metrics.max_rc_tract_nt as f64),
+        "rc_tract_count" => Some(metrics.rc_tract_count as f64),
+        "dominant_period_nt" => metrics.dominant_period_nt.map(|v| v as f64),
+        "periodicity_score" => Some(metrics.periodicity_score),
+        "repeat_units" => metrics.repeat_units,
+        _ => None,
+    }
+}
+
+fn write_characterization_summary(
+    path: &PathBuf,
+    names: &[String],
+    selected_order: &[u16],
+    rows_by_subfamily: &FxHashMap<u16, Vec<ReadMetrics>>,
+) {
+    let mut out = BufWriter::new(File::create(path).expect("Cannot create summary output"));
+    writeln!(
+        out,
+        "subfamily\tmetric\tn\tmean\tsd\tmedian\tq1\tq3\tp05\tp95"
+    )
+    .unwrap();
+
+    for &id in selected_order {
+        let name = names[id as usize].as_str();
+        let rows = rows_by_subfamily
+            .get(&id)
+            .expect("Selected subfamily summary rows missing");
+        for &metric in SUMMARY_METRICS {
+            let values: Vec<f64> = rows
+                .iter()
+                .filter_map(|m| metric_value(m, metric))
+                .collect();
+            if let Some(stats) = summarize_values(values) {
+                writeln!(
+                    out,
+                    "{}\t{}\t{}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.6}",
+                    name,
+                    metric,
+                    stats.n,
+                    stats.mean,
+                    stats.sd,
+                    stats.median,
+                    stats.q1,
+                    stats.q3,
+                    stats.p05,
+                    stats.p95
+                )
+                .unwrap();
+            } else {
+                writeln!(
+                    out,
+                    "{}\t{}\t0\tNA\tNA\tNA\tNA\tNA\tNA\tNA",
+                    name, metric
+                )
+                .unwrap();
+            }
+        }
+    }
+    out.flush().unwrap();
+}
+
+fn summarize_values(mut values: Vec<f64>) -> Option<SummaryStats> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_unstable_by(|a, b| a.total_cmp(b));
+    let n = values.len();
+    let mean = values.iter().sum::<f64>() / n as f64;
+    let variance = values
+        .iter()
+        .map(|v| {
+            let d = v - mean;
+            d * d
+        })
+        .sum::<f64>()
+        / n as f64;
+
+    Some(SummaryStats {
+        n,
+        mean,
+        sd: variance.sqrt(),
+        median: quantile_sorted(&values, 0.50),
+        q1: quantile_sorted(&values, 0.25),
+        q3: quantile_sorted(&values, 0.75),
+        p05: quantile_sorted(&values, 0.05),
+        p95: quantile_sorted(&values, 0.95),
+    })
+}
+
+fn quantile_sorted(values: &[f64], q: f64) -> f64 {
+    if values.len() == 1 {
+        return values[0];
+    }
+    let position = q * (values.len() - 1) as f64;
+    let lower = position.floor() as usize;
+    let upper = position.ceil() as usize;
+    if lower == upper {
+        values[lower]
+    } else {
+        let weight = position - lower as f64;
+        values[lower] * (1.0 - weight) + values[upper] * weight
     }
 }
 
@@ -1013,6 +2026,77 @@ fn get_rc_kmer(val: u128, k: usize) -> u128 {
     (!swapped) >> (128 - 2 * k)
 }
 
+
+#[cfg(test)]
+mod characterization_tests {
+    use super::*;
+
+    fn approx_eq(a: f64, b: f64) {
+        assert!((a - b).abs() < 1e-9, "{} != {}", a, b);
+    }
+
+    #[test]
+    fn composition_ignores_ambiguous_bases() {
+        let m = characterize_read(b"ACGTN", 5, 12, 0.80, 0.02);
+        assert_eq!(m.length, 5);
+        assert_eq!(m.valid_bases, 4);
+        approx_eq(m.gc_fraction, 0.5);
+        approx_eq(m.a_fraction, 0.25);
+        approx_eq(m.c_fraction, 0.25);
+        approx_eq(m.g_fraction, 0.25);
+        approx_eq(m.t_fraction, 0.25);
+        approx_eq(m.base_entropy, 1.0);
+    }
+
+    #[test]
+    fn ambiguous_base_breaks_homopolymer() {
+        assert_eq!(longest_homopolymer(b"AAAANAAAA"), 4);
+    }
+
+    #[test]
+    fn reverse_complement_tract_is_merged_and_covered() {
+        let (fraction, max_tract, count) =
+            reverse_complementarity_metrics(b"ACGTTGNNNNCAACGT", 6, 12);
+        approx_eq(fraction, 1.0);
+        assert_eq!(max_tract, 6);
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn primitive_period_is_preferred() {
+        let (period, score, units) = periodicity_metrics(b"ATATATAT", 12, 0.80, 0.02);
+        assert_eq!(period, Some(2));
+        approx_eq(score, 1.0);
+        approx_eq(units.unwrap(), 4.0);
+    }
+
+    #[test]
+    fn example_periods_are_detected() {
+        assert_eq!(periodicity_metrics(b"AAAAAAAA", 12, 0.80, 0.02).0, Some(1));
+        assert_eq!(periodicity_metrics(b"CAGCAGCAG", 12, 0.80, 0.02).0, Some(3));
+        assert_eq!(
+            periodicity_metrics(b"AATAACAATAAC", 12, 0.80, 0.02).0,
+            Some(6)
+        );
+    }
+
+    #[test]
+    fn exported_assignment_lines_are_parsed() {
+        assert!(parse_assignment_line("-1\n", 1, 10).is_empty());
+        assert_eq!(parse_assignment_line("3\n", 2, 10), vec![3]);
+        assert_eq!(parse_assignment_line("7,2\n", 3, 10), vec![2, 7]);
+    }
+
+    #[test]
+    fn assignment_map_path_matches_quant_output_name() {
+        let assignments = PathBuf::from("results/sample.assignments.tsv");
+        assert_eq!(
+            default_assignment_map_path(&assignments),
+            PathBuf::from("results/sample.assignments.tsv.map.tsv")
+        );
+    }
+}
+
 fn get_fastx_reader(path: &PathBuf) -> Box<dyn FastxReader> {
     let is_gzipped = path
         .extension()
@@ -1032,3 +2116,4 @@ fn get_fastx_reader(path: &PathBuf) -> Box<dyn FastxReader> {
         needletail::parse_fastx_file(path).unwrap()
     }
 }
+

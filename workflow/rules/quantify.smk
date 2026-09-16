@@ -116,7 +116,8 @@ rule quantify_repeats:
         index = config["quantification"]["repeat_index_path"]
     output:
         counts = os.path.join(config["paths"]["data"], "{sample}/quant_repeats/counts.tsv"),
-        assignments = os.path.join(config["paths"]["data"], "{sample}/quant_repeats/assignments.txt") if config["quantification"].get("export_assignments", False) else []
+        assignments = os.path.join(config["paths"]["data"], "{sample}/quant_repeats/assignments.txt") if config["quantification"].get("export_assignments", False) else [],
+        assignment_map = os.path.join(config["paths"]["data"], "{sample}/quant_repeats/assignments.txt.map.tsv") if config["quantification"].get("export_assignments", False) else []
     params:
         min_matches = config["quantification"].get("min_kmer_matches", 1),
         assign_flag = lambda wildcards, output: f"--assignments-out {output.assignments}" if hasattr(output, "assignments") and output.assignments else ""
@@ -147,6 +148,123 @@ rule quantify_repeats:
                 --output {output.counts}
         fi
         """
+
+# ------------------------------------------------------------------------------
+# 2b. Post-assignment read characterization
+# ------------------------------------------------------------------------------
+
+if config["quantification"].get("export_assignments", False):
+    CHARACTERIZE_SUBFAMILIES_FILE = config["quantification"]["characterize_subfamilies_file"]
+
+    with open(CHARACTERIZE_SUBFAMILIES_FILE) as fh:
+        CHARACTERIZE_SUBFAMILIES = [
+            line.strip()
+            for line in fh
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+
+    if not CHARACTERIZE_SUBFAMILIES:
+        raise ValueError(
+            f"No subfamilies found in {CHARACTERIZE_SUBFAMILIES_FILE}"
+        )
+
+    rule characterize_repeats:
+        """
+        Characterize reads assigned to all configured repeat subfamilies.
+        One job is created per sample, so each FASTQ pair is read/decompressed
+        only once for characterization.
+        """
+        container: config["docker_images"]["repeatquant"]
+        input:
+            assignments = os.path.join(
+                config["paths"]["data"],
+                "{sample}/quant_repeats/assignments.txt"
+            ),
+            assignment_map = os.path.join(
+                config["paths"]["data"],
+                "{sample}/quant_repeats/assignments.txt.map.tsv"
+            ),
+            r1 = os.path.join(
+                config["paths"]["data"],
+                "{sample}/fastp/reads_1.trimmed.fastq.gz"
+            ),
+            r2 = os.path.join(
+                config["paths"]["data"],
+                "{sample}/fastp/reads_2.trimmed.fastq.gz"
+            ),
+            layout = os.path.join(
+                config["paths"]["data"],
+                "{sample}/raw/layout.txt"
+            )
+        output:
+            per_read = os.path.join(
+                config["paths"]["data"],
+                "{sample}/characterize/selected.per_read.tsv"
+            ),
+            summary = os.path.join(
+                config["paths"]["data"],
+                "{sample}/characterize/selected.summary.tsv"
+            )
+        params:
+            output_prefix = lambda wc: os.path.join(
+                config["paths"]["data"],
+                wc.sample,
+                "characterize",
+                "selected"
+            ),
+            subfamilies = ",".join(CHARACTERIZE_SUBFAMILIES)
+        threads: config["resource_profiles"]["heavy"]["threads"]
+        resources:
+            mem_mb = config["resource_profiles"]["heavy"]["mem_mb"]
+        benchmark:
+            os.path.join(
+                config["paths"]["benchmarks"],
+                "characterize_repeats/{sample}.txt"
+            )
+        log:
+            os.path.join(
+                config["paths"]["data"],
+                "{sample}/logs/characterize.log"
+            )
+        shell:
+            r"""
+            mkdir -p $(dirname "{params.output_prefix}")
+            layout=$(cat {input.layout})
+
+            if [ "$layout" = "paired" ]; then
+                repeat_counter characterize \
+                    --assignments {input.assignments} \
+                    --assignment-map {input.assignment_map} \
+                    --r1 {input.r1} \
+                    --r2 {input.r2} \
+                    --subfamily '{params.subfamilies}' \
+                    --output-prefix "{params.output_prefix}" \
+                    --threads {threads} \
+                    > "{log}" 2>&1
+            else
+                repeat_counter characterize \
+                    --assignments {input.assignments} \
+                    --assignment-map {input.assignment_map} \
+                    --r1 {input.r1} \
+                    --subfamily '{params.subfamilies}' \
+                    --output-prefix "{params.output_prefix}" \
+                    --threads {threads} \
+                    > "{log}" 2>&1
+            fi
+            """
+
+    CHARACTERIZE_TARGETS = expand(
+        os.path.join(
+            config["paths"]["data"],
+            "{sample}/characterize/selected.summary.tsv"
+        ),
+        sample=SAMPLES
+    )
+else:
+    CHARACTERIZE_SUBFAMILIES = []
+    CHARACTERIZE_TARGETS = []
+
+
 
 rule kmer_aggregate_matrix:
     """

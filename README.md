@@ -10,7 +10,7 @@ It features a hybrid input system that handles both local FASTQ files and automa
 
 ## 🛠️ Standalone `repeatquant` (`repeat_counter`) CLI Usage
 
-The `repeatquant` binary (`repeat_counter`) provides two primary subcommands: `index` and `quant`.
+The `repeatquant` binary (`repeat_counter`) provides three primary subcommands: `index`, `quant`, and `characterize`.
 
 ### 1. Indexing (`repeat_counter index`)
 Generates filtered subfamily k-mer FASTA files and/or zero-copy binary index files (`.idx`) from genomic reference data.
@@ -37,6 +37,46 @@ Quantifies repeat expression from single-end or paired-end FASTQ files using a c
 * **`--min-matches <INT>`**: Minimum k-mer matches required to assign a read (default: 1).
 * **`--assignments-out <PATH>`**: Optional path to export 1:1 read assignment IDs matching FASTQ order.
 * **`--debug`**: Enable debug logging.
+
+### 3. Read characterization (`repeat_counter characterize`)
+Characterizes reads assigned to selected repeat subfamilies using the assignment outputs produced by `repeat_counter quant`. For paired-end data, R1 and R2 are characterized independently while retaining a shared fragment identifier.
+
+* **`--assignments <PATH>`**: Read-assignment file generated during quantification.
+* **`--assignment-map <PATH>`**: Assignment map corresponding to `--assignments`.
+* **`--r1 <PATH>`**: Path to Read 1 FASTQ file.
+* **`--r2 <PATH>`**: Path to Read 2 FASTQ file (omit for single-end data).
+* **`--subfamily <PATH>`**: Path to a text file listing the repeat subfamilies to characterize, one per line. The file must contain the **final repeat names used in the assignment output**, with `/` in the original repeat annotation names replaced by `_` before they are written to the file (e.g., `AluSx#SINE/Alu` becomes `AluSx#SINE_Alu`).
+* **`--output-prefix <PATH>`**: Prefix for characterization outputs. The workflow writes `<prefix>.per_read.tsv` and `<prefix>.summary.tsv`.
+* **`--threads <INT>`**: Number of processing threads.
+
+#### Per-read characterization columns
+
+| Column | Brief summary | How calculated |
+| --- | --- | --- |
+| `fragment_id` | Sequential identifier for the assigned fragment. | Incremented once per FASTQ record pair; R1 and R2 from the same paired-end fragment share the same ID. |
+| `read_id` | Original FASTQ read identifier. | Taken directly from the FASTQ header for the individual read. |
+| `mate` | Indicates which observed read was characterized. | `R1` for read 1 and `R2` for read 2; each mate is characterized independently. |
+| `subfamily` | User-selected subfamily associated with this characterized read. | Intersection of the fragment's winning assignments with the subfamilies requested for characterization; multiple names are comma-separated if ambiguous assignments are included. |
+| `assignment` | Full repeat-subfamily assignment of the fragment. | R1 and R2 k-mer votes are combined; all subfamilies tied for the highest vote count above `min_matches` are reported. |
+| `assignment_ambiguous` | Indicates whether the fragment has multiple equally supported assignments. | `true` when more than one subfamily ties for the maximum assignment score; otherwise `false`. |
+| `length` | Total observed read length in nucleotides. | Number of sequence characters in the FASTQ read, including ambiguous bases such as `N`. |
+| `valid_bases` | Number of bases with definite nucleotide identity. | Count of positions containing A, C, G, or T; ambiguous bases are excluded. |
+| `gc_fraction` | Fraction of valid bases that are G or C. | `(G + C) / valid_bases`. |
+| `a_fraction` | Fraction of valid bases that are A. | `A / valid_bases`. |
+| `c_fraction` | Fraction of valid bases that are C. | `C / valid_bases`. |
+| `g_fraction` | Fraction of valid bases that are G. | `G / valid_bases`. |
+| `t_fraction` | Fraction of valid bases that are T. | `T / valid_bases`. |
+| `base_entropy` | Normalized nucleotide-composition entropy; higher values indicate more balanced base composition. | Shannon entropy `−Σ pᵢ log₂(pᵢ)` over A/C/G/T frequencies, divided by 2 so the range is 0–1. |
+| `max_homopolymer_nt` | Length of the longest consecutive run of one nucleotide. | Maximum run of identical A, C, G, or T bases; ambiguous bases break a run. |
+| `mono_dominance` | Fraction of valid 1-mer positions occupied by the most frequent nucleotide. | Count of the most frequent 1-mer divided by the number of valid 1-mer positions. |
+| `di_dominance` | Fraction of valid 2-mer positions occupied by the most frequent dinucleotide. | Count of the most frequent 2-mer divided by all valid overlapping 2-mer windows. Windows containing ambiguous bases are excluded. |
+| `tri_dominance` | Fraction of valid 3-mer positions occupied by the most frequent trinucleotide. | Count of the most frequent 3-mer divided by all valid overlapping 3-mer windows. Windows containing ambiguous bases are excluded. |
+| `rc_covered_fraction` | Fraction of valid bases participating in qualifying exact intraread reverse-complementary tracts. | Positions belonging to ≥1 exact reverse-complementary tract of at least `min_rc_tract` nt are marked; marked positions are divided by `valid_bases`. |
+| `max_rc_tract_nt` | Length of the longest exact reverse-complementary tract within the read. | Finds maximal exact reverse-complementary alignments between distinct regions of the read and reports the longest qualifying tract. |
+| `rc_tract_count` | Number of qualifying exact reverse-complementary tracts. | Counts maximal reverse-complementary alignment runs of at least `min_rc_tract` nt, avoiding counting overlapping k-mer matches from the same alignment as separate events. |
+| `dominant_period_nt` | Shortest strongly supported tandem-repeat period. | Tests periods `1 … min(max_period, length/2)` by comparing bases separated by each period; among near-best qualifying periods, the shortest period is selected. `NA` if none reaches the threshold. |
+| `periodicity_score` | Strength of sequence agreement with the selected repeat period. | For period `p`, number of valid position pairs where `base[i] = base[i−p]` divided by the number of comparable valid pairs. If no period qualifies, the best observed score is reported. |
+| `repeat_units` | Approximate number of repeat units represented by the read. | `length / dominant_period_nt`; reported as `NA` when no dominant period is detected. |
 
 ---
 
@@ -184,6 +224,8 @@ Upon successful completion, results are stored in the results/ directory:
 * data/kmer_counts_cpm.tsv: CPM-normalized counts for repeats.
 * data/gene_counts_raw.tsv: Gene expression counts (aggregated via tximport).
 * data/sample_total_reads.tsv: The number of reads which passed fastp in each library. These value are used for CPM calculation.
+* data/<sample>/characterize/selected.per_read.tsv: Per-read characterization metrics for the configured repeat subfamilies (when assignment export/characterization is enabled).
+* data/<sample>/characterize/selected.summary.tsv: Summary characterization output for the configured repeat subfamilies.
 * data/MultiQC/multiqc_report.html**: Aggregated quality control report.
 
 ## 🤝 Acknowledgements & Credits

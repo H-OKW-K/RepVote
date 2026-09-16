@@ -14,4 +14,4 @@ RUN chmod +x /usr/local/bin/repeat_counter
 
 CMD ["repeat_counter", "--help"]
 
-#docker build -t repeatquant:1.1.0 .
+#docker build -t repeatquant_characerizer:0.0.1 . && apptainer build repeatquant_char.sif docker-daemon:repeatquant_characerizer:0.0.1
